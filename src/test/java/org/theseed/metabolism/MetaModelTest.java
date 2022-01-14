@@ -116,7 +116,11 @@ public class MetaModelTest {
         assertThat("Producers found for invalid metabolite.", producers.isEmpty());
         List<String> prodNames = model.getProducers("ser__L_c").stream().map(x  -> x.getBiggId()).collect(Collectors.toList());
         assertThat(prodNames, containsInAnyOrder("SERAT", "GHMT2r", "LSERDHr"));
-
+        Reaction testReact = model.getReaction("ATPS4rpp");
+        assertThat(testReact.getBiggId(), equalTo("ATPS4rpp"));
+        Set<String> triggers = testReact.getTriggers();
+        assertThat(triggers, contains("b3731", "b3732", "b3733", "b3734", "b3735",
+                "b3736", "b3737", "b3738", "b3739"));
     }
 
 }

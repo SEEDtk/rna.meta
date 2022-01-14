@@ -4,6 +4,7 @@
 package org.theseed.metabolism;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -15,7 +16,7 @@ import java.util.List;
  * @author Bruce Parrello
  *
  */
-public class Pathway {
+public class Pathway implements Iterable<Pathway.Element> {
 
     // FIELDS
     /** ordered list of pathway elements */
@@ -124,6 +125,27 @@ public class Pathway {
         if (n > 0)
             retVal = this.elements.get(n - 1);
         return retVal;
+    }
+
+    @Override
+    public Iterator<Element> iterator() {
+        return this.elements.iterator();
+    }
+
+    /**
+     * @return the number of segments in this path
+     */
+    public int size() {
+        return this.elements.size();
+    }
+
+    /**
+     * @return the specified pathway element
+     *
+     * @param i		index of the element to return
+     */
+    public Element getElement(int i) {
+        return this.elements.get(i);
     }
 
 }

@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -45,6 +46,8 @@ public class Reaction implements Comparable<Reaction> {
     private List<Segment> segments;
     /** display location of reaction label */
     private Coordinate labelLoc;
+    /** connectors for reaction rules */
+    private static final Set<String> CONNECTORS = Set.of("and", "or", "not");
 
     private static enum ReactionKeys implements JsonKey {
         NAME("<unknown>"), BIGG_ID(""), REVERSIBILITY(false), LABEL_X(0.0), LABEL_Y(0.0),
@@ -299,6 +302,18 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
+     * @return the set of triggering genes for this reaction
+     */
+    public Set<String> getTriggers() {
+        String[] parts = this.reactionRule.split("[\\s+()]+");
+        Set<String> retVal = new TreeSet<String>();
+        for (String part : parts) {
+            if (! part.isEmpty() && ! CONNECTORS.contains(part.toLowerCase()))
+                retVal.add(part);
+        }
+        return retVal;
+    }
+    /**
      * @return the components of the reaction (reactants and products with stoichometric coefficients)
      */
     public List<Stoich> getMetabolites() {
@@ -352,13 +367,25 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
+     * Here we want to determine what the possible outputs are for a reaction with
+     * the specified metabolite as input.
+     *
+     * @param inputId	metabolite used as input
+     *
      * @return a list of the eligible output metabolite elements for this reaction
      */
-    public Collection<Stoich> getOutputs() {
-        List<Stoich> retVal = this.metabolites;
-        if (! this.reversible)
-            retVal = this.metabolites.stream().filter(x -> x.isProduct())
+    public Collection<Stoich> getOutputs(String inputId) {
+        // Find the stoichiometric coefficient for the input metabolite.
+        Optional<Stoich> input = this.metabolites.stream()
+                .filter(x -> x.biggId.equals(inputId)).findAny();
+        Collection<Stoich> retVal;
+        if (! input.isPresent())
+            retVal = Collections.emptyList();
+        else {
+            double inCoeff = input.get().coefficient;
+            retVal = this.metabolites.stream().filter(x -> x.coefficient * inCoeff < 0)
                     .collect(Collectors.toList());
+        }
         return retVal;
     }
 

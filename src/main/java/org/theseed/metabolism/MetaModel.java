@@ -9,10 +9,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.Stack;
 import java.util.TreeSet;
@@ -57,12 +59,76 @@ public class MetaModel {
     private Map<String, Set<Reaction>> producerMap;
     /** map of metabolite BiGG IDs to nodes */
     private Map<String, List<ModelNode.Metabolite>> metaboliteMap;
+    /** map of reaction BiGG IDs to reactions */
+    private Map<String, Reaction> bReactionMap;
     /** map of node IDs to nodes */
     private Map<Integer, ModelNode> nodeMap;
     /** return value when no reactions found */
-    private Set<Reaction> NO_REACTIONS = Collections.emptySet();
+    private static Set<Reaction> NO_REACTIONS = Collections.emptySet();
     /** return value when no metabolite nodes are found */
     private List<ModelNode.Metabolite> NO_METABOLITES = Collections.emptyList();
+    /** maximum number of successor reactions for a compound to be considered common */
+    private static int MAX_SUCCESSORS = 20;
+    /** maximum pathway length */
+    private static int MAX_PATH_LEN = 100;
+    /** set of common compounds */
+    private static Set<String> COMMONS = Set.of("h_c", "h_p", "h2o_c", "atp_c", "co2_c",
+            "o2_c", "pi_c", "adp_c", "glu__D_c");
+
+    /**
+     * This class is used to sort a distance map from lowest distance to highest.
+     */
+    public static class DSorter implements Comparator<Map.Entry<String, Integer>> {
+
+        @Override
+        public int compare(Map.Entry<String, Integer> o1, Map.Entry<String, Integer> o2) {
+            int retVal = o1.getValue() - o2.getValue();
+            if (retVal == 0)
+                retVal = o1.getKey().compareTo(o2.getKey());
+            return retVal;
+        }
+
+    }
+
+    /**
+     * This class is used to sort pathways by shortest-to-target to longest-to-target.
+     * The constructor takes a model paining as input.
+     */
+    public static class QSorter implements Comparator<Pathway> {
+
+        /** map of distances for useful nodes */
+        private Map<String, Integer> distanceMap;
+
+        /**
+         * Construct a comparator for pathways using the specified distance map.
+         *
+         * @param painting	distance map for ordering pathways
+         */
+        public QSorter(Map<String, Integer> painting) {
+            this.distanceMap = painting;
+        }
+
+        @Override
+        public int compare(Pathway o1, Pathway o2) {
+            var terminus1 = o1.getLast().getOutput();
+            var terminus2 = o2.getLast().getOutput();
+            Integer t1 = this.distanceMap.getOrDefault(terminus1, Integer.MAX_VALUE);
+            Integer t2 = this.distanceMap.getOrDefault(terminus2, Integer.MAX_VALUE);
+            int retVal = t1 - t2;
+            if (retVal == 0) {
+                retVal = o1.size() - o2.size();
+                if (retVal == 0) {
+                    for (int i = 0; i < o1.size() && retVal == 0; i++) {
+                        Pathway.Element e1 = o1.getElement(i);
+                        Pathway.Element e2 = o2.getElement(i);
+                        retVal = e1.getReaction().getId() - e2.getReaction().getId();
+                    }
+                }
+            }
+            return retVal;
+        }
+
+    }
 
     /**
      * Construct a metabolic model from a file and a genome.
@@ -72,7 +138,9 @@ public class MetaModel {
      * @throws IOException
      */
     public MetaModel(File inFile, Genome genome) throws IOException {
+        // Save the base genome.
         this.baseGenome = genome;
+        // Read in the model file.
         FileReader reader = new FileReader(inFile);
         try {
             JsonArray parts = (JsonArray) Jsoner.deserialize(reader);
@@ -100,11 +168,13 @@ public class MetaModel {
         this.reactionMap = new HashMap<String, Set<Reaction>>(hashSize);
         this.successorMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
         this.producerMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
+        this.bReactionMap = new HashMap<String, Reaction>(hashSize);
         this.orphans = new HashSet<Reaction>();
         for (Map.Entry<String, Object> reactionEntry : reactions.entrySet()) {
             int reactionId = Integer.valueOf(reactionEntry.getKey());
             JsonObject reactionObject = (JsonObject) reactionEntry.getValue();
             Reaction reaction = new Reaction(reactionId, reactionObject);
+            this.bReactionMap.put(reaction.getBiggId(), reaction);
             Collection<String> genes = reaction.getGenes();
             // For each gene alias, connect this reaction to the relevant features.
             boolean found = false;
@@ -278,16 +348,75 @@ public class MetaModel {
     }
 
     /**
-     * @return the pathways between two metabolites
+     * This method computes the minimum reaction distance from each metabolite to a
+     * target metabolite.
+     *
+     * @param target	BiGG ID of the target metabolite
+     * @param commons	set of common compounds to ignore
+     *
+     * @return a map from metabolite IDs to reaction counts
+     */
+    public Map<String, Integer> paintModel(String target, Set<String> commons) {
+        // This will be our processing stack.
+        Stack<String> stack = new Stack<String>();
+        // This will be the return map.
+        Map<String, Integer> retVal = new HashMap<String, Integer>(this.successorMap.size());
+        // Prime the stack.
+        retVal.put(target, 0);
+        stack.push(target);
+        while (! stack.empty()) {
+            String compound = stack.pop();
+            int distance = retVal.get(compound) + 1;
+            if (distance < MAX_PATH_LEN) {
+                Set<Reaction> producers = this.producerMap.getOrDefault(compound, NO_REACTIONS);
+                for (Reaction producer : producers) {
+                    var inputs = producer.getOutputs(compound).stream()
+                            .map(x -> x.getMetabolite())
+                            .filter(x -> ! commons.contains(x) && ! retVal.containsKey(x))
+                            .collect(Collectors.toList());
+                    for (String input : inputs) {
+                        retVal.put(input, distance);
+                        stack.push(input);
+                    }
+                }
+            }
+        }
+        return retVal;
+    }
+
+    /**
+     * Compute the full set of common compounds.  This includes the known commons
+     * (like CO2 and water) plus any compound with more than the set number of
+     * successors.
+     *
+     * @return the set of common compounds for this model
+     */
+    public Set<String> getCommons() {
+        Set<String> retVal = new HashSet<String>(COMMONS);
+        for (Map.Entry<String, Set<Reaction>> succession : this.successorMap.entrySet()) {
+            if (succession.getValue().size() > MAX_SUCCESSORS)
+                retVal.add(succession.getKey());
+        }
+        return retVal;
+    }
+
+    /**
+     * @return the shortest pathway between two metabolites
      *
      * @param bigg1		BiGG ID of start metabolite
      * @param bigg2		BiGG ID of end metabolite
      */
-    public Collection<Pathway> getPathways(String bigg1, String bigg2) {
+    public Pathway getPathway(String bigg1, String bigg2) {
+        // Compute the common compounds.
+        Set<String> commons = this.getCommons();
+        log.info("{} metabolites identified as common.", commons.size());
         // This will hold the pathways we like.
-        List<Pathway> retVal = new ArrayList<Pathway>();
-        // We are doing a depth-first search.  This will be our processing stack.
-        Stack<Pathway> stack = new Stack<Pathway>();
+        Pathway retVal = null;
+        // Paint the model by the distance to the target.
+        Map<String, Integer> distanceMap = this.paintModel(bigg2, commons);
+        // We are doing a smart breadth-first search.  This will be our processing stack.
+        Comparator<Pathway> cmp = new QSorter(distanceMap);
+        PriorityQueue<Pathway> stack = new PriorityQueue<Pathway>(100, cmp);
         // Get the starting reactions.
         Set<Reaction> starters = this.getSuccessors(bigg1);
         // Verify that the end metabolite can be produced.
@@ -299,21 +428,23 @@ public class MetaModel {
         else {
             // Loop through the starters, setting up the initial pathways.
             for (Reaction starter : starters) {
-                Collection<Reaction.Stoich> outputs = starter.getOutputs();
+                var outputs = starter.getOutputs(bigg1);
                 for (Reaction.Stoich node : outputs)
-                    stack.push(new Pathway(starter, node));
+                    stack.add(new Pathway(starter, node));
             }
             // Now process the stack until it is empty.
-            while (! stack.empty()) {
-                Pathway path = stack.pop();
+            int procCount = 0;
+            int keptCount = 0;
+            while (! stack.isEmpty() && retVal == null) {
+                Pathway path = stack.poll();
                 // Get the last element for this pathway.
                 Pathway.Element terminus = path.getLast();
                 // Get the BiGG ID for the metabolite.
                 String outputId = terminus.getOutput();
                 // If we have found our output, we are done.  We output the pathway
-                // and don't add anything to the stack.
+                // and the loop will stop.
                 if (outputId.equals(bigg2))
-                    retVal.add(path);
+                    retVal = path;
                 else {
                     // Get the reactions that use this metabolite.
                     Set<Reaction> successors = this.getSuccessors(outputId);
@@ -322,15 +453,26 @@ public class MetaModel {
                     // way a search can end.
                     for (Reaction successor : successors) {
                         if (! path.contains(successor)) {
-                            // Add a pathway for each output of this reaction.
-                            Collection<Reaction.Stoich> outputs = successor.getOutputs();
+                            // Add a pathway for each output of this reaction.  Note
+                            // we don't bother if there is no path from the output to
+                            // our target.
+                            var outputs = successor.getOutputs(outputId);
                             for (Reaction.Stoich output : outputs) {
-                                Pathway newPath = path.clone().add(successor, output);
-                                stack.push(newPath);
+                                int dist = distanceMap.getOrDefault(output.getMetabolite(), MAX_PATH_LEN);
+                                if (dist + path.size() < MAX_PATH_LEN) {
+                                    Pathway newPath = path.clone().add(successor, output);
+                                    stack.add(newPath);
+                                }
                             }
+                            keptCount++;
                         }
                     }
                 }
+                procCount++;
+                if (log.isInfoEnabled() && procCount % 100000 == 0)
+                    log.info("{} partial paths processed, {} kept.  Stack size = {}; {} found.",
+                            procCount, keptCount, stack.size(),
+                            retVal.size());
             }
         }
         return retVal;
@@ -343,7 +485,7 @@ public class MetaModel {
      *
      * @return the set of successor reactions (which may be empty)
      */
-    Set<Reaction> getSuccessors(String product) {
+    public Set<Reaction> getSuccessors(String product) {
         return this.successorMap.getOrDefault(product, NO_REACTIONS);
     }
 
@@ -354,8 +496,36 @@ public class MetaModel {
      *
      * @return the set of producing reactions (which may be empty)
      */
-    Set<Reaction> getProducers(String product) {
+    public Set<Reaction> getProducers(String product) {
         return this.producerMap.getOrDefault(product, NO_REACTIONS);
+    }
+
+    /**
+     * Specify a new limit for useful compounds.
+     *
+     * @param maxSuccessors 	the maximum number of successors that a useful compound
+     * 							can have
+     */
+    public static void setMaxSuccessors(int maxSuccessors) {
+        MAX_SUCCESSORS = maxSuccessors;
+    }
+
+    /**
+     * Specify the pathway size limit for searches.
+     *
+     * @param maxPathway		the maximum length of a pathway to return
+     */
+    public static void setMaxPathway(int maxPathway) {
+        MAX_PATH_LEN = maxPathway;
+    }
+
+    /**
+     * @return the reaction with the specified BiGG ID, or NULL if none exists
+     *
+     * @param biggId	ID of the desired reaction
+     */
+    public Reaction getReaction(String biggId) {
+        return this.bReactionMap.get(biggId);
     }
 
 }
