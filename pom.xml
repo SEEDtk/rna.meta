@@ -98,8 +98,25 @@
                 </exclusion>
             </exclusions>
         </dependency>
-
-        <!-- Testing dependencies-->
+        <!-- https://mvnrepository.com/artifact/org.sbml.jsbml/jsbml -->
+        <dependency>
+            <groupId>org.sbml.jsbml</groupId>
+            <artifactId>jsbml</artifactId>
+            <version>1.6.1</version>
+            <exclusions>
+                  <exclusion>
+                      <groupId>org.apache.logging.log4j</groupId>
+                      <artifactId>log4j-slf4j-impl</artifactId>
+                  </exclusion>
+            </exclusions>
+        </dependency>
+		<!-- https://mvnrepository.com/artifact/org.sbml.jsbml.ext/jsbml-fbc -->
+		<dependency>
+		    <groupId>org.sbml.jsbml.ext</groupId>
+		    <artifactId>jsbml-fbc</artifactId>
+		    <version>1.6.1</version>
+		</dependency>
+		<!-- Testing dependencies-->
         <dependency>
           <groupId>org.hamcrest</groupId>
           <artifactId>hamcrest</artifactId>

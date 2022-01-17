@@ -20,6 +20,13 @@ import java.util.Stack;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
+import org.sbml.jsbml.Model;
+import org.sbml.jsbml.ext.fbc.Association;
+import org.sbml.jsbml.ext.fbc.FBCReactionPlugin;
+import org.sbml.jsbml.ext.fbc.GeneProductRef;
+import org.sbml.jsbml.ext.fbc.LogicalOperator;
+import org.sbml.jsbml.ext.fbc.Or;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.theseed.genome.Genome;
@@ -30,10 +37,10 @@ import com.github.cliftonlabs.json_simple.JsonObject;
 import com.github.cliftonlabs.json_simple.Jsoner;
 
 /**
- * This object represents a metabolic model loaded from a JSON file.  The model consists of
- * nodes that represent chemical products and reactions that are triggered by genes.  The
- * primary goal is to determine the effect of suppressing or over-stimulating individual
- * genes.
+ * This object represents a metabolic model based on the Escher Map structure.  The model
+ * consists of nodes that represent chemical products and reactions that are triggered by
+ * genes.  The primary goal is to determine the effect of suppressing or over-stimulating
+ * individual genes.
  *
  * @author Bruce Parrello
  *
@@ -63,6 +70,8 @@ public class MetaModel {
     private Map<String, Reaction> bReactionMap;
     /** map of node IDs to nodes */
     private Map<Integer, ModelNode> nodeMap;
+    /** last ID used */
+    private int lastId;
     /** return value when no reactions found */
     private static Set<Reaction> NO_REACTIONS = Collections.emptySet();
     /** return value when no metabolite nodes are found */
@@ -140,6 +149,8 @@ public class MetaModel {
     public MetaModel(File inFile, Genome genome) throws IOException {
         // Save the base genome.
         this.baseGenome = genome;
+        // Denote no IDs have been used.
+        this.lastId = 0;
         // Read in the model file.
         FileReader reader = new FileReader(inFile);
         try {
@@ -172,6 +183,7 @@ public class MetaModel {
         this.orphans = new HashSet<Reaction>();
         for (Map.Entry<String, Object> reactionEntry : reactions.entrySet()) {
             int reactionId = Integer.valueOf(reactionEntry.getKey());
+            this.checkId(reactionId);
             JsonObject reactionObject = (JsonObject) reactionEntry.getValue();
             Reaction reaction = new Reaction(reactionId, reactionObject);
             this.bReactionMap.put(reaction.getBiggId(), reaction);
@@ -184,9 +196,7 @@ public class MetaModel {
                     log.warn("No features found for gene alias \"" + gene + "\" in reaction " + reaction.toString());
                 else {
                     for (String fid : fids) {
-                        Set<Reaction> fidReactions = this.reactionMap.computeIfAbsent(fid,
-                                x -> new TreeSet<Reaction>());
-                        fidReactions.add(reaction);
+                        this.addFidReaction(reaction, fid);
                         found = true;
                     }
 
@@ -197,25 +207,14 @@ public class MetaModel {
                 this.orphans.add(reaction);
             // For each metabolite, add this reaction as a successor or consumer,
             // as appropriate.
-            for (Reaction.Stoich stoich : reaction.getMetabolites()) {
-                String compound = stoich.getMetabolite();
-                if (reaction.isReversible() || ! stoich.isProduct()) {
-                    Set<Reaction> successors = this.successorMap.computeIfAbsent(compound,
-                            x -> new TreeSet<Reaction>());
-                    successors.add(reaction);
-                }
-                if (reaction.isReversible() || stoich.isProduct()) {
-                    Set<Reaction> producers = this.producerMap.computeIfAbsent(compound,
-                            x -> new TreeSet<Reaction>());
-                    producers.add(reaction);
-                }
-            }
+            this.createReactionNetwork(reaction);
         }
         // Now set up the nodes.
         this.nodeMap = new HashMap<Integer, ModelNode>(nodeHashSize);
         this.metaboliteMap = new HashMap<String, List<ModelNode.Metabolite>>(nodes.size());
         for (Map.Entry<String, Object> nodeEntry : nodes.entrySet()) {
             int nodeId = Integer.valueOf(nodeEntry.getKey());
+            this.checkId(nodeId);
             ModelNode node = ModelNode.create(nodeId, (JsonObject) nodeEntry.getValue());
             this.nodeMap.put(nodeId, node);
             if (node instanceof ModelNode.Metabolite) {
@@ -225,6 +224,59 @@ public class MetaModel {
                 metaNodes.add(metaNode);
             }
         }
+    }
+
+    /**
+     * Process all the metabolites for the specified reaction, updating  up the
+     * successor and producer maps.
+     *
+     * @param reaction		reaction of interest
+     */
+    private void createReactionNetwork(Reaction reaction) {
+        for (Reaction.Stoich stoich : reaction.getMetabolites()) {
+            String compound = stoich.getMetabolite();
+            if (reaction.isReversible() || ! stoich.isProduct()) {
+                Set<Reaction> successors = this.successorMap.computeIfAbsent(compound,
+                        x -> new TreeSet<Reaction>());
+                successors.add(reaction);
+            }
+            if (reaction.isReversible() || stoich.isProduct()) {
+                Set<Reaction> producers = this.producerMap.computeIfAbsent(compound,
+                        x -> new TreeSet<Reaction>());
+                producers.add(reaction);
+            }
+        }
+    }
+
+    /**
+     * Add the specified reaction to the reaction set for the specified feature.
+     *
+     * @param reaction		reaction to add
+     * @param fid			feature that triggers the reaction
+     */
+    private void addFidReaction(Reaction reaction, String fid) {
+        Set<Reaction> fidReactions = this.reactionMap.computeIfAbsent(fid,
+                x -> new TreeSet<Reaction>());
+        fidReactions.add(reaction);
+    }
+
+    /**
+     * Insure an ID number is recorded.  The highest ID number is remembered
+     * so we can create new ones.
+     *
+     * @param id	ID number to check
+     */
+    private void checkId(int id) {
+        if (id > this.lastId)
+            this.lastId = id;
+    }
+
+    /**
+     * @return the next available ID number.
+     */
+    private int getNextId() {
+        this.lastId++;
+        return this.lastId;
     }
 
     /**
@@ -526,6 +578,101 @@ public class MetaModel {
      */
     public Reaction getReaction(String biggId) {
         return this.bReactionMap.get(biggId);
+    }
+
+    /**
+     * Add an SBML model to this map.  Currently, we just add the reactions, and
+     * do not create nodes or segments.  The result is good enough for analysis
+     * of pathways.
+     *
+     * The SBML model must use Argonne naming conventions:  each ID consists of a
+     * prefix ("X_", where "X" indicates the type) plus the BiGG ID.
+     *
+     * @param sbmlModel		SBML model to import
+     */
+    public void importSbml(Model sbmlModel) {
+        int newReactionCount = 0;
+        // We will need the alias map for the base genome.
+        var aliasMap = this.baseGenome.getAliasMap();
+        // The basic strategy is to import the reactions, adding the metabolites as
+        // needed.
+        final int rN = sbmlModel.getReactionCount();
+        for (int rI = 0; rI < rN; rI++) {
+            var newReaction = sbmlModel.getReaction(rI);
+            // Get the BiGG ID of the reaction.  Only proceed if the reaction is
+            // not already present.
+            String rBiggId = StringUtils.removeStart(newReaction.getId(), "R_");
+            if (! this.bReactionMap.containsKey(rBiggId)) {
+                newReactionCount++;
+                // Get an ID for this reaction.
+                int reactionId = this.getNextId();
+                Reaction reaction = new Reaction(reactionId, rBiggId, newReaction.getName());
+                reaction.setReversible(newReaction.getReversible());
+                // The things we care about are the reaction rule and that stoichiometric
+                // formula.  The reaction rule is first.
+                this.setSbmlReactionRule(reaction, newReaction);
+                this.bReactionMap.put(rBiggId, reaction);
+                Set<String> genes = reaction.getTriggers();
+                for (String gene : genes)
+                    aliasMap.get(gene).stream().forEach(x -> this.addFidReaction(reaction, x));
+                // Build the stoichiometry.
+                newReaction.getListOfProducts().forEach(x -> reaction.addStoich(x, 1));
+                newReaction.getListOfReactants().forEach(x -> reaction.addStoich(x, -1));
+                // Update the networking maps.
+                this.createReactionNetwork(reaction);
+            }
+        }
+        log.info("{} new reactions found.", newReactionCount);
+    }
+
+    /**
+     * Compute the reaction rule for an SBML reaction node
+     *
+     * @param reaction		reaction object to update
+     * @param newReaction	SBML reaction node to parse
+     *
+     * @return the reaction rule string for this reaction
+     */
+    private void setSbmlReactionRule(Reaction reaction, org.sbml.jsbml.Reaction newReaction) {
+        // Get an FBC-enabled version of the reaction.
+        var trigger = ((FBCReactionPlugin) newReaction.getExtension("fbc"))
+                .getGeneProductAssociation();
+        if (trigger != null) {
+            var rule = trigger.getAssociation();
+            // We will track the aliases in here.
+            Set<String> genes = new TreeSet<String>();
+            String ruleString = this.processRule(rule, genes);
+            reaction.setRule(ruleString);
+            log.debug("Rule string is {}.", ruleString);
+            genes.stream().forEach(x -> reaction.addAlias(x));
+        }
+    }
+
+    /**
+     * Recursively parse this rule into a reaction rule string.
+     *
+     * @param rule		rule to parse (as an XML tree)
+     * @param genes		place to save genes found
+     *
+     * @return a rule expression
+     */
+    private String processRule(Association rule, Set<String> genes) {
+        String retVal;
+        if (rule instanceof GeneProductRef) {
+            // Here we have a leaf.
+            String id = ((GeneProductRef) rule).getGeneProduct();
+            retVal = StringUtils.removeStart(id, "G_");
+            genes.add(retVal);
+        } else {
+            // Here we have a logical operator.
+            LogicalOperator op = ((LogicalOperator) rule);
+            // Compute the operator type.
+            String operation = (op instanceof Or ? " or " : " and ");
+            // Join the children.
+            retVal = op.getListOfAssociations().stream().map(x -> this.processRule(x, genes))
+                    .collect(Collectors.joining(operation, "(", ")"));
+        }
+        return retVal;
     }
 
 }

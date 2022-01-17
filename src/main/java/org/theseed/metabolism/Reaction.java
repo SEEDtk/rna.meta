@@ -13,6 +13,8 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
+import org.sbml.jsbml.SpeciesReference;
+
 import com.github.cliftonlabs.json_simple.JsonArray;
 import com.github.cliftonlabs.json_simple.JsonKey;
 import com.github.cliftonlabs.json_simple.JsonObject;
@@ -260,6 +262,25 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
+     * Create a new reaction with the specified name.
+     *
+     * @param reactionId		ID number of the reaction
+     * @param biggId			BiGG ID of the reaction
+     * @param reactionName		name of the reaction
+     */
+    public Reaction(int reactionId, String biggId, String reactionName) {
+        this.id = reactionId;
+        this.biggId = biggId;
+        this.name = reactionName;
+        this.aliases = new TreeSet<String>();
+        this.labelLoc = null;
+        this.metabolites = new ArrayList<Stoich>();
+        this.reversible = false;
+        this.segments = new ArrayList<Segment>();
+        this.reactionRule = "";
+    }
+
+    /**
      * @return the reaction ID number
      */
     public int getId() {
@@ -387,6 +408,46 @@ public class Reaction implements Comparable<Reaction> {
                     .collect(Collectors.toList());
         }
         return retVal;
+    }
+
+    /**
+     * Store a new reaction rule for this reaction.
+     *
+     * @param reactionRule2		new reaction rule
+     */
+    protected void setRule(String reactionRule2) {
+        this.reactionRule = reactionRule2;
+        this.aliases.clear();
+    }
+
+    /**
+     * Store a new gene alias for this reaction.
+     *
+     * @param alias		alias to add to the alias list
+     */
+    protected void addAlias(String alias) {
+        this.aliases.add(alias);
+    }
+
+    /**
+     * Specify the reversibility of this reaction.
+     *
+     * @param reversible2	TRUE if the reaction is to be reversible, else FALSE
+     */
+    public void setReversible(boolean reversible2) {
+        this.reversible = reversible2;
+    }
+
+    /**
+     * Add the stoichiometry from an SBML species reference to this reaction.
+     *
+     * @param x			source SBML species reference
+     * @param factor	1 for a product, -1 for a reactant
+     */
+    protected void addStoich(SpeciesReference x, int factor) {
+        String metabolite = StringUtils.removeStart(x.getSpecies(), "M_");
+        int coeff = ((int) x.getStoichiometry()) * factor;
+        this.metabolites.add(new Stoich(coeff, metabolite));
     }
 
 }

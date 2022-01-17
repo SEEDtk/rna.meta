@@ -4,14 +4,15 @@
 package org.theseed.rna.meta;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import org.kohsuke.args4j.Argument;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+
+import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.theseed.genome.Genome;
 import org.theseed.metabolism.MetaModel;
-import org.theseed.utils.BaseReportProcessor;
 import org.theseed.utils.ParseFailureException;
 
 /**
@@ -26,42 +27,48 @@ import org.theseed.utils.ParseFailureException;
  * -v	display more frequent log messages
  * -o	output file for report, if not STDOUT
  *
+ * --sbml	name of an SBML file containing additional reactions to import
+ *
  * @author Bruce Parrello
  *
  */
-public abstract class BaseModelReportProcessor extends BaseReportProcessor {
+public abstract class BaseModelReportProcessor extends BaseModelProcessor {
 
     // FIELDS
     /** logging facility */
     protected static Logger log = LoggerFactory.getLogger(BaseModelReportProcessor.class);
     /** metabolic model */
     private MetaModel model;
+    /** output stream */
+    private OutputStream outStream;
 
     // COMMAND-LINE OPTIONS
 
-    /** model JSON file */
-    @Argument(index = 0, metaVar = "model.json", usage = "JSON file for metabolic model",
-            required = true)
-    private File modelFile;
-
-    /** base genome GTO file */
-    @Argument(index = 1, metaVar = "genome.gto", usage = "GTO file for base genome",
-            required = true)
-    private File genomeFile;
+    /** output file (if not STDOUT) */
+    @Option(name = "-o", aliases = { "--output" }, usage = "output file for report (if not STDOUT)")
+    private File outFile;
 
     @Override
-    protected void validateReporterParms() throws IOException, ParseFailureException {
-        // Load the genome and the model.
-        if (! this.genomeFile.canRead())
-            throw new FileNotFoundException("Genome file " + this.genomeFile + " is not found or unreadable.");
-        if (! this.modelFile.canRead())
-            throw new FileNotFoundException("Model file " + this.modelFile + " is not found or unreadable.");
-        log.info("Initializing model.");
-        Genome baseGenome = new Genome(this.genomeFile);
-        log.info("Loaded genome {}.", baseGenome);
-        this.model = new MetaModel(this.modelFile, baseGenome);
-        log.info("Model loaded from {}.  {} genome features have associated reactions.",
-                this.modelFile, this.model.featuresCovered());
+    protected void setModelDefaults() {
+        this.outFile = null;
+        this.setReporterDefaults();
+    }
+
+    /**
+     * Set the option defaults for the subclass.
+     */
+    protected abstract void setReporterDefaults();
+
+    @Override
+    protected void validateModelParms() throws IOException, ParseFailureException {
+        // Handle the output file.
+        if (this.outFile == null) {
+            log.info("Output will be to the standard output.");
+            this.outStream = System.out;
+        } else {
+            log.info("Output will be to {}.", this.outFile);
+            this.outStream = new FileOutputStream(this.outFile);
+        }
         this.validateModelReportParms();
     }
 
@@ -79,4 +86,25 @@ public abstract class BaseModelReportProcessor extends BaseReportProcessor {
     protected MetaModel getModel() {
         return this.model;
     }
+
+    @Override
+    protected final void runCommand() throws Exception {
+        try (PrintWriter writer = new PrintWriter(this.outStream)) {
+            this.runReporter(writer);
+        } finally {
+            // Insure the output file is closed.
+            if (this.outFile != null)
+                this.outStream.close();
+        }
+    }
+
+    /**
+     * Execute the command and produce the report.
+     *
+     *  @param writer	print writer to receive the report
+     *
+     *  @throws Exception
+     */
+    protected abstract void runReporter(PrintWriter writer) throws Exception;
+
 }

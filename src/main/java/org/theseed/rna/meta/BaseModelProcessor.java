@@ -15,14 +15,13 @@ import org.sbml.jsbml.Model;
 import org.sbml.jsbml.SBMLReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.theseed.erdb.utils.BaseDbProcessor;
 import org.theseed.genome.Genome;
-import org.theseed.java.erdb.DbConnection;
 import org.theseed.metabolism.MetaModel;
+import org.theseed.utils.BaseProcessor;
 import org.theseed.utils.ParseFailureException;
 
 /**
- * This is a base class for processing metabolic models against the RNA database
+ * This is a base class for commands against metabolic models.
  *
  * The positional parameters are the name of the model JSON file and the name of the
  * GTO file for the base genome.
@@ -32,22 +31,18 @@ import org.theseed.utils.ParseFailureException;
  * -h	display command-line usage
  * -v	display more frequent log messages
  *
- * --sbml		name of an SBML file containing additional reactions to import
- * --type		type of database (default SQLITE)
- * --dbfile		database file name (SQLITE only)
- * --url		URL of database (host and name)
- * --parms		database connection parameter string (currently only MySQL)
+ * --sbml	name of an SBML file containing additional reactions to import
  *
  * @author Bruce Parrello
  *
  */
-public abstract class BaseModelDbProcessor extends BaseDbProcessor {
+public abstract class BaseModelProcessor extends BaseProcessor {
 
     // FIELDS
     /** logging facility */
-    protected static Logger log = LoggerFactory.getLogger(BaseModelDbProcessor.class);
+    protected static Logger log = LoggerFactory.getLogger(BaseModelProcessor.class);
     /** metabolic model */
-    private MetaModel model0;
+    private MetaModel model;
 
     // COMMAND-LINE OPTIONS
 
@@ -66,6 +61,17 @@ public abstract class BaseModelDbProcessor extends BaseDbProcessor {
     private File genomeFile;
 
     @Override
+    protected final void setDefaults() {
+        this.sbmlFile = null;
+        this.setModelDefaults();
+    }
+
+    /**
+     * Set the default options for the subclass.
+     */
+    protected abstract void setModelDefaults();
+
+    @Override
     protected final boolean validateParms() throws IOException, ParseFailureException {
         // Load the genome and the model.
         if (! this.genomeFile.canRead())
@@ -75,14 +81,14 @@ public abstract class BaseModelDbProcessor extends BaseDbProcessor {
         log.info("Initializing model.");
         Genome baseGenome = new Genome(this.genomeFile);
         log.info("Loaded genome {}.", baseGenome);
-        this.model0 = new MetaModel(this.modelFile, baseGenome);
+        this.model = new MetaModel(this.modelFile, baseGenome);
         log.info("Model loaded from {}.  {} genome features have associated reactions.",
-                this.modelFile, this.model0.featuresCovered());
+                this.modelFile, this.model.featuresCovered());
         if (this.sbmlFile != null) {
             log.info("Loading additional reactions from {}.", this.sbmlFile);
             try {
                 Model xmlModel = SBMLReader.read(this.sbmlFile).getModel();
-                this.model0.importSbml(xmlModel);
+                this.model.importSbml(xmlModel);
             } catch (XMLStreamException e) {
                 throw new IOException("XML Error: " + e.toString());
             }
@@ -99,18 +105,10 @@ public abstract class BaseModelDbProcessor extends BaseDbProcessor {
      */
     protected abstract void validateModelParms() throws IOException, ParseFailureException;
 
-    @Override
-    protected final void runDbCommand(DbConnection db) throws Exception {
-        this.runModelDbCommand(this.model0, db);
-    }
-
     /**
-     * Run the command against the specified metabolic model.
-     *
-     * @param model		target metabolic model to process
-     * @param db		RNA database connection
-     *
-     * @throws Exception
+     * @return the model
      */
-    protected abstract void runModelDbCommand(MetaModel model, DbConnection db) throws Exception;
+    protected MetaModel getModel() {
+        return this.model;
+    }
 }
