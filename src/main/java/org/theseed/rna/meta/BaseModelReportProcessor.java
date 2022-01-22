@@ -12,7 +12,6 @@ import java.io.PrintWriter;
 import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.theseed.metabolism.MetaModel;
 import org.theseed.utils.ParseFailureException;
 
 /**
@@ -37,8 +36,6 @@ public abstract class BaseModelReportProcessor extends BaseModelProcessor {
     // FIELDS
     /** logging facility */
     protected static Logger log = LoggerFactory.getLogger(BaseModelReportProcessor.class);
-    /** metabolic model */
-    private MetaModel model;
     /** output stream */
     private OutputStream outStream;
 
@@ -79,13 +76,6 @@ public abstract class BaseModelReportProcessor extends BaseModelProcessor {
      * @throws IOException
      */
     protected abstract void validateModelReportParms() throws IOException, ParseFailureException;
-
-    /**
-     * @return the model
-     */
-    protected MetaModel getModel() {
-        return this.model;
-    }
 
     @Override
     protected final void runCommand() throws Exception {

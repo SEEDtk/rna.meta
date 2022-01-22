@@ -355,6 +355,30 @@ public class Reaction implements Comparable<Reaction> {
         return this.labelLoc;
     }
 
+    /**
+     * @return the reaction formula as a string
+     */
+    public String getFormula() {
+        // We build the left and right separately and join them at the end.
+        List<String> left = new ArrayList<String>(this.metabolites.size());
+        List<String> right = new ArrayList<String>(this.metabolites.size());
+        for (Stoich stoich : this.metabolites) {
+            int coeff = stoich.getCoeff();
+            String part;
+            if (coeff == 1)
+                part = stoich.getMetabolite();
+            else
+                part = String.format("%d*%s", coeff, stoich.getMetabolite());
+            if (stoich.isProduct())
+                right.add(part);
+            else
+                left.add(part);
+        }
+        String retVal = StringUtils.join(left, " + ") + " --> "
+                + StringUtils.join(right, " + ");
+        return retVal;
+    }
+
     @Override
     public int compareTo(Reaction o) {
         return (this.id - o.id);
@@ -426,7 +450,9 @@ public class Reaction implements Comparable<Reaction> {
      * @param alias		alias to add to the alias list
      */
     protected void addAlias(String alias) {
-        this.aliases.add(alias);
+        // Skip null and empty aliases. These are sometimes found in the SBML.
+        if (! StringUtils.isBlank(alias))
+            this.aliases.add(alias);
     }
 
     /**

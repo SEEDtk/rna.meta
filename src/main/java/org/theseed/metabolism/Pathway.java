@@ -6,6 +6,7 @@ package org.theseed.metabolism;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A pathway is an ordered set of reactions from one gene to another.  The rule is
@@ -146,6 +147,28 @@ public class Pathway implements Iterable<Pathway.Element> {
      */
     public Element getElement(int i) {
         return this.elements.get(i);
+    }
+
+    /**
+     * @return TRUE if this path includes all the reactions in the specified set, else FALSE
+     *
+     * @param includes	set of BiGG IDs for required reactions
+     */
+    public boolean includesAll(Set<String> includes) {
+        Iterator<String> iter = includes.iterator();
+        boolean retVal = true;
+        while (iter.hasNext() && retVal) {
+            String rID = iter.next();
+            final int n = this.elements.size();
+            boolean found = false;
+            for (int i = 0; i < n && ! found; i++) {
+                Reaction r = this.elements.get(i).reaction;
+                if (r.getBiggId().equals(rID))
+                    found = true;
+            }
+            retVal = found;
+        }
+        return retVal;
     }
 
 }

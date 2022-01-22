@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.sbml.jsbml.Model;
 import org.sbml.jsbml.ext.fbc.Association;
+import org.sbml.jsbml.ext.fbc.FBCModelPlugin;
 import org.sbml.jsbml.ext.fbc.FBCReactionPlugin;
 import org.sbml.jsbml.ext.fbc.GeneProductRef;
 import org.sbml.jsbml.ext.fbc.LogicalOperator;
@@ -82,7 +83,8 @@ public class MetaModel {
     private static int MAX_PATH_LEN = 100;
     /** set of common compounds */
     private static Set<String> COMMONS = Set.of("h_c", "h_p", "h2o_c", "atp_c", "co2_c",
-            "o2_c", "pi_c", "adp_c", "glu__D_c");
+            "o2_c", "pi_c", "adp_c", "glu__D_c", "nadh_p", "nadh_c", "nad_c", "nadph_c",
+            "o2_p", "na1_p", "na1_c");
 
     /**
      * This class is used to sort a distance map from lowest distance to highest.
@@ -187,24 +189,8 @@ public class MetaModel {
             JsonObject reactionObject = (JsonObject) reactionEntry.getValue();
             Reaction reaction = new Reaction(reactionId, reactionObject);
             this.bReactionMap.put(reaction.getBiggId(), reaction);
-            Collection<String> genes = reaction.getGenes();
             // For each gene alias, connect this reaction to the relevant features.
-            boolean found = false;
-            for (String gene : genes) {
-                var fids = aliasMap.get(gene);
-                if (fids == null)
-                    log.warn("No features found for gene alias \"" + gene + "\" in reaction " + reaction.toString());
-                else {
-                    for (String fid : fids) {
-                        this.addFidReaction(reaction, fid);
-                        found = true;
-                    }
-
-                }
-            }
-            // If we did not connect this reaction to a gene, make it an orphan.
-            if (! found)
-                this.orphans.add(reaction);
+            this.connectReaction(aliasMap, reaction);
             // For each metabolite, add this reaction as a successor or consumer,
             // as appropriate.
             this.createReactionNetwork(reaction);
@@ -224,6 +210,31 @@ public class MetaModel {
                 metaNodes.add(metaNode);
             }
         }
+    }
+
+    /**
+     * Connect a reaction to its triggering features.
+     *
+     * @param aliasMap		alias map for the base genome
+     * @param reaction		reaction of interest
+     */
+    private void connectReaction(Map<String, Set<String>> aliasMap, Reaction reaction) {
+        Collection<String> genes = reaction.getGenes();
+        boolean found = false;
+        for (String gene : genes) {
+            var fids = aliasMap.get(gene);
+            if (fids == null)
+                log.debug("No features found for gene alias \"" + gene + "\" in reaction " + reaction.toString());
+            else {
+                for (String fid : fids) {
+                    this.addFidReaction(reaction, fid);
+                    found = true;
+                }
+            }
+        }
+        // If we did not connect this reaction to a gene, make it an orphan.
+        if (! found)
+            this.orphans.add(reaction);
     }
 
     /**
@@ -457,75 +468,110 @@ public class MetaModel {
      *
      * @param bigg1		BiGG ID of start metabolite
      * @param bigg2		BiGG ID of end metabolite
+     * @param filter	pathway filter to use
      */
-    public Pathway getPathway(String bigg1, String bigg2) {
-        // Compute the common compounds.
-        Set<String> commons = this.getCommons();
-        log.info("{} metabolites identified as common.", commons.size());
-        // This will hold the pathways we like.
+    public Pathway getPathway(String bigg1, String bigg2, PathwayFilter filter) {
+        // This will hold the return pathway.
         Pathway retVal = null;
-        // Paint the model by the distance to the target.
-        Map<String, Integer> distanceMap = this.paintModel(bigg2, commons);
-        // We are doing a smart breadth-first search.  This will be our processing stack.
-        Comparator<Pathway> cmp = new QSorter(distanceMap);
-        PriorityQueue<Pathway> stack = new PriorityQueue<Pathway>(100, cmp);
         // Get the starting reactions.
         Set<Reaction> starters = this.getSuccessors(bigg1);
-        // Verify that the end metabolite can be produced.
-        boolean endOk = this.producerMap.containsKey(bigg2);
-        if  (! endOk)
-            log.warn("No reactions produce metabolite \"" + bigg2 + "\".");
-        else if (starters.isEmpty())
+        if (starters.isEmpty())
             log.warn("No reactions use metabolite \"" + bigg1 + "\".");
         else {
             // Loop through the starters, setting up the initial pathways.
+            List<Pathway> initial = new ArrayList<Pathway>(starters.size());
             for (Reaction starter : starters) {
                 var outputs = starter.getOutputs(bigg1);
                 for (Reaction.Stoich node : outputs)
-                    stack.add(new Pathway(starter, node));
+                    initial.add(new Pathway(starter, node));
             }
-            // Now process the stack until it is empty.
-            int procCount = 0;
-            int keptCount = 0;
-            while (! stack.isEmpty() && retVal == null) {
-                Pathway path = stack.poll();
-                // Get the last element for this pathway.
-                Pathway.Element terminus = path.getLast();
-                // Get the BiGG ID for the metabolite.
-                String outputId = terminus.getOutput();
-                // If we have found our output, we are done.  We output the pathway
-                // and the loop will stop.
-                if (outputId.equals(bigg2))
+            retVal = findPathway(initial, bigg2, filter);
+        }
+        return retVal;
+    }
+
+    /**
+     * @return the shortest pathway that extends a given pathway to an end metabolite
+     *
+     * @param start		initial pathway to extend
+     * @param bigg2		BiGG ID of end metabolite
+     * @param filter	pathway filter to use
+     */
+    public Pathway extendPathway(Pathway start, String bigg2, PathwayFilter filter) {
+        var initial = Collections.singleton(start);
+        return this.findPathway(initial, bigg2, filter);
+    }
+
+    /**
+     * Find a pathway from a particular starting list to a particular compound using a
+     * particular filter.
+     *
+     * @param initial	initial set of pathways to start from
+     * @param compound	target ending metabolite
+     * @param filter	pathway filter to use for filtering
+     *
+     * @return the shortest pathway that satisfies all the criteria, or NULL if none
+     * 		   was found
+     */
+    private Pathway findPathway(Collection<Pathway> initial, String compound, PathwayFilter filter) {
+        // Verify that the end metabolite can be produced.
+        boolean endOk = this.producerMap.containsKey(compound);
+        if  (! endOk)
+            log.warn("No reactions produce metabolite \"" + compound + "\".");
+        // Compute the common compounds.
+        Set<String> commons = this.getCommons();
+        log.info("{} metabolites identified as common.", commons.size());
+        // Paint the model by the distance to the target.
+        Map<String, Integer> distanceMap = this.paintModel(compound, commons);
+        // We are doing a smart breadth-first search.  This will be our processing stack.
+        Comparator<Pathway> cmp = new QSorter(distanceMap);
+        PriorityQueue<Pathway> stack = new PriorityQueue<Pathway>(100, cmp);
+        // Fill the stack with the initial pathways.
+        stack.addAll(initial);
+        // Now process the stack until it is empty.
+        int procCount = 0;
+        int keptCount = 0;
+        Pathway retVal = null;
+        while (! stack.isEmpty() && retVal == null) {
+            Pathway path = stack.poll();
+            // Get the last element for this pathway.
+            Pathway.Element terminus = path.getLast();
+            // Get the BiGG ID for the metabolite.
+            String outputId = terminus.getOutput();
+            // If we have found our output, we need to check for includes.
+            if (outputId.equals(compound)) {
+                // If we keep the path, it terminates the loop.  If we decide it
+                // is missing a key reaction, the path dies and we keep looking
+                // for others.
+                if (filter.isGood(path))
                     retVal = path;
-                else {
-                    // Get the reactions that use this metabolite.
-                    Set<Reaction> successors = this.getSuccessors(outputId);
-                    // Now we extend the path.  We take care here not to re-add a
-                    // reaction already in the path.  This is the third and final
-                    // way a search can end.
-                    for (Reaction successor : successors) {
-                        if (! path.contains(successor)) {
-                            // Add a pathway for each output of this reaction.  Note
-                            // we don't bother if there is no path from the output to
-                            // our target.
-                            var outputs = successor.getOutputs(outputId);
-                            for (Reaction.Stoich output : outputs) {
-                                int dist = distanceMap.getOrDefault(output.getMetabolite(), MAX_PATH_LEN);
-                                if (dist + path.size() < MAX_PATH_LEN) {
-                                    Pathway newPath = path.clone().add(successor, output);
-                                    stack.add(newPath);
-                                }
+            } else {
+                // Get the reactions that use this metabolite.
+                Set<Reaction> successors = this.getSuccessors(outputId);
+                // Now we extend the path.  We take care here not to re-add a
+                // reaction already in the path.  This is the third and final
+                // way a search can end.
+                for (Reaction successor : successors) {
+                    if (! path.contains(successor)) {
+                        // Add a pathway for each output of this reaction.  Note
+                        // we don't bother if there is no path from the output to
+                        // our target.
+                        var outputs = successor.getOutputs(outputId);
+                        for (Reaction.Stoich output : outputs) {
+                            int dist = distanceMap.getOrDefault(output.getMetabolite(), MAX_PATH_LEN);
+                            if (dist + path.size() < MAX_PATH_LEN) {
+                                Pathway newPath = path.clone().add(successor, output);
+                                stack.add(newPath);
                             }
-                            keptCount++;
                         }
+                        keptCount++;
                     }
                 }
-                procCount++;
-                if (log.isInfoEnabled() && procCount % 100000 == 0)
-                    log.info("{} partial paths processed, {} kept.  Stack size = {}; {} found.",
-                            procCount, keptCount, stack.size(),
-                            retVal.size());
             }
+            procCount++;
+            if (log.isInfoEnabled() && procCount % 100000 == 0)
+                log.info("{} partial paths processed, {} kept.  Stack size = {}.",
+                        procCount, keptCount, stack.size());
         }
         return retVal;
     }
@@ -594,6 +640,8 @@ public class MetaModel {
         int newReactionCount = 0;
         // We will need the alias map for the base genome.
         var aliasMap = this.baseGenome.getAliasMap();
+        // Get an FBC-aware version of the model.
+        var fbcModel = (FBCModelPlugin) sbmlModel.getExtension("fbc");
         // The basic strategy is to import the reactions, adding the metabolites as
         // needed.
         final int rN = sbmlModel.getReactionCount();
@@ -610,11 +658,17 @@ public class MetaModel {
                 reaction.setReversible(newReaction.getReversible());
                 // The things we care about are the reaction rule and that stoichiometric
                 // formula.  The reaction rule is first.
-                this.setSbmlReactionRule(reaction, newReaction);
+                var products = this.setSbmlReactionRule(reaction, newReaction);
                 this.bReactionMap.put(rBiggId, reaction);
-                Set<String> genes = reaction.getTriggers();
-                for (String gene : genes)
-                    aliasMap.get(gene).stream().forEach(x -> this.addFidReaction(reaction, x));
+                // The reaction still needs the gene aliases.  We find these in the
+                // gene product records.
+                for (String product : products) {
+                    var productRef = fbcModel.getGeneProduct(product);
+                    reaction.addAlias(productRef.getName());
+                    reaction.addAlias(productRef.getLabel());
+                }
+                // Finally, connect the reaction to its features.
+                this.connectReaction(aliasMap, reaction);
                 // Build the stoichiometry.
                 newReaction.getListOfProducts().forEach(x -> reaction.addStoich(x, 1));
                 newReaction.getListOfReactants().forEach(x -> reaction.addStoich(x, -1));
@@ -631,28 +685,27 @@ public class MetaModel {
      * @param reaction		reaction object to update
      * @param newReaction	SBML reaction node to parse
      *
-     * @return the reaction rule string for this reaction
+     * @return the IDs of the gene products used in the rule
      */
-    private void setSbmlReactionRule(Reaction reaction, org.sbml.jsbml.Reaction newReaction) {
+    private Set<String> setSbmlReactionRule(Reaction reaction, org.sbml.jsbml.Reaction newReaction) {
+        Set<String> retVal = new TreeSet<String>();
         // Get an FBC-enabled version of the reaction.
         var trigger = ((FBCReactionPlugin) newReaction.getExtension("fbc"))
                 .getGeneProductAssociation();
         if (trigger != null) {
             var rule = trigger.getAssociation();
             // We will track the aliases in here.
-            Set<String> genes = new TreeSet<String>();
-            String ruleString = this.processRule(rule, genes);
+            String ruleString = this.processRule(rule, retVal);
             reaction.setRule(ruleString);
-            log.debug("Rule string is {}.", ruleString);
-            genes.stream().forEach(x -> reaction.addAlias(x));
         }
+        return retVal;
     }
 
     /**
      * Recursively parse this rule into a reaction rule string.
      *
      * @param rule		rule to parse (as an XML tree)
-     * @param genes		place to save genes found
+     * @param genes		place to save gene products found
      *
      * @return a rule expression
      */
@@ -662,7 +715,7 @@ public class MetaModel {
             // Here we have a leaf.
             String id = ((GeneProductRef) rule).getGeneProduct();
             retVal = StringUtils.removeStart(id, "G_");
-            genes.add(retVal);
+            genes.add(id);
         } else {
             // Here we have a logical operator.
             LogicalOperator op = ((LogicalOperator) rule);
@@ -673,6 +726,13 @@ public class MetaModel {
                     .collect(Collectors.joining(operation, "(", ")"));
         }
         return retVal;
+    }
+
+    /**
+     * @return the map of compounds to producers
+     */
+    public Map<String, Set<Reaction>> getProducerMap() {
+        return this.getProducerMap();
     }
 
 }

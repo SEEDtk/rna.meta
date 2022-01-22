@@ -8,8 +8,11 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -25,6 +28,8 @@ import org.theseed.java.erdb.DbQuery;
 import org.theseed.java.erdb.Relop;
 import org.theseed.metabolism.MetaModel;
 import org.theseed.metabolism.Pathway;
+import org.theseed.metabolism.PathwayFilter;
+import org.theseed.metabolism.PathwayFilter.IParms;
 import org.theseed.metabolism.Reaction;
 import org.theseed.utils.ParseFailureException;
 
@@ -34,9 +39,10 @@ import org.theseed.utils.ParseFailureException;
  * all of the connected genes.
  *
  * The positional parameters are the name of the model JSON file, the name of the
- * GTO file for the base genome, the BiGG ID of the input metabolite, the
- * BiGG ID of the output metabolite, and finally the name of the output file,
- * which will be an Excel spreadsheet.
+ * GTO file for the base genome, the name of the output file (which will be
+ * an Excel spreadsheet, and then the BiGG IDs of the required metabolites, in
+ * order.  A pathway will be returned that starts from the first metabolite,
+ * passes through all the others, and ends with the last metabolite.
  *
  * The output will be in excel format.
  *
@@ -49,22 +55,28 @@ import org.theseed.utils.ParseFailureException;
  * --common		the number of successor reactions that indicates a common compound
  * 				(default 20)
  * --maxLen		maximum size of a useful pathway (default 60)
- *
+ * --filter		type of filter to use (default NONE)
+ * --include	the ID of a reaction the pathway must include (filter type REACTIONS)
+ * --avoid		the ID of a metabolite the pathway must avoid (filter type AVOID)
  *
  * @author Bruce Parrello
  *
  */
-public class PathwayProcessor extends BaseModelDbProcessor {
+public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
 
     // FIELDS
     /** excel workbook for output */
     private CustomWorkbook workbook;
+    /** pathway filter */
+    private PathwayFilter filter;
+    /** metabolic model of interest */
+    private MetaModel targetModel;
 
 
     // COMMAND-LINE OPTIONS
 
     /** common-compound indicator */
-    @Option(name = "--common", metaVar = "20", usage = "maximum number of successor reactions for a useful compound")
+    @Option(name = "--common", metaVar = "30", usage = "maximum number of successor reactions for a useful compound")
     private int maxSuccessors;
 
     /** maximum size of a useful pathway */
@@ -75,25 +87,40 @@ public class PathwayProcessor extends BaseModelDbProcessor {
     @Option(name = "--geneCSV", aliases = { "-g" }, usage = "output file for triggering gene CSV" )
     private File genesOut;
 
+    /** list of IDs for reactions to include */
+    @Option(name = "--include", aliases = { "-I" }, usage = "ID of a required reaction (multiple allowed)")
+    private List<String> includeList;
+
+    /** list of IDs for metabolites to avoid */
+    @Option(name = "--avoid", aliases = { "-A" }, usage = "ID of a prohibited metabolite (multiple allowed)")
+    private List<String> avoidList;
+
+    /** filter type */
+    @Option(name = "--filter", aliases = { "-f" }, usage = "type of filtering")
+    private PathwayFilter.Type filterType;
+
+    /** output excel file */
+    @Argument(index = 2, metaVar = "outFile.xlsx", usage = "output excel file", required = true)
+    private File outFile;
+
     /** input metabolite */
-    @Argument(index = 2, metaVar = "input", usage = "BiGG ID of input metabolite",
+    @Argument(index = 3, metaVar = "input", usage = "BiGG ID of input metabolite",
             required = true)
     private String inputId;
 
-    /** output metabolite */
-    @Argument(index = 3, metaVar = "output", usage = "BiGG ID of output metabolite",
+    /** other metabolites */
+    @Argument(index = 4, metaVar = "output", usage = "BiGG ID of other metabolite",
             required = true)
-    private String outputId;
-
-    /** output excel file */
-    @Argument(index = 4, metaVar = "outFile.xlsx", usage = "output excel file", required = true)
-    private File outFile;
+    private List<String> otherIdList;
 
     @Override
     protected void setDbDefaults() {
         this.maxSuccessors = 20;
         this.maxPathway = 60;
         this.genesOut = null;
+        this.includeList = new ArrayList<String>();
+        this.avoidList = new ArrayList<String>();
+        this.filterType = PathwayFilter.Type.NONE;
     }
 
     @Override
@@ -115,9 +142,23 @@ public class PathwayProcessor extends BaseModelDbProcessor {
 
     @Override
     protected void runModelDbCommand(MetaModel model, DbConnection db) throws Exception {
-        // Get the pathways from the input to the output.
-        log.info("Computing pathways from {} to {}.", this.inputId, this.outputId);
-        Pathway path = model.getPathway(this.inputId, this.outputId);
+        // Save the metabolic model.
+        this.targetModel = model;
+        // Create the pathway filter.
+        this.filter = this.filterType.create(this);
+        // Get the pathway from the input to the first output.
+        Iterator<String> outputIter = this.otherIdList.iterator();
+        String output1 = outputIter.next();
+        log.info("Computing pathway from {} to {}.", this.inputId, output1);
+        Pathway path = model.getPathway(this.inputId, output1, this.filter);
+        // Now extend the path through the other metabolites.
+        while (path != null && outputIter.hasNext()) {
+            String output = outputIter.next();
+            log.info("Extending pathway to {}.", output);
+            path = model.extendPathway(path, output, filter);
+        }
+        if (path == null)
+            throw new ParseFailureException("No path found.");
         // It is time to do the reports.  This will collect the triggering
         // genes.
         Set<String> genes = new TreeSet<String>();
@@ -129,7 +170,8 @@ public class PathwayProcessor extends BaseModelDbProcessor {
         String oldInput = this.inputId;
         // Start the pathway report.
         this.workbook.addSheet("Pathway", true);
-        this.workbook.setHeaders(Arrays.asList("reaction", "reaction_name", "rule", "output"));
+        this.workbook.setHeaders(Arrays.asList("reaction", "reaction_name", "rule", "output",
+                "formula"));
         for (Pathway.Element element : path) {
             Reaction reaction = element.getReaction();
             String intermediate = element.getOutput();
@@ -138,6 +180,7 @@ public class PathwayProcessor extends BaseModelDbProcessor {
             this.workbook.storeCell(reaction.getName());
             this.workbook.storeCell(reaction.getReactionRule());
             this.workbook.storeCell(element.getOutput());
+            this.workbook.storeCell(reaction.getFormula());
             // Add the triggering genes to the gene set.
             genes.addAll(reaction.getTriggers());
             // Get the reaction inputs.
@@ -234,6 +277,21 @@ public class PathwayProcessor extends BaseModelDbProcessor {
                 genesWriter.format("%s,%4.2f%n", gene, baselines.getOrDefault(gene, 1.0));
         }
         log.info("Gene CSV file written to {}.", this.genesOut);
+    }
+
+    @Override
+    public List<String> getInclude() {
+        return this.includeList;
+    }
+
+    @Override
+    public List<String> getAvoid() {
+        return this.avoidList;
+    }
+
+    @Override
+    public MetaModel getModel() {
+        return this.targetModel;
     }
 
 }

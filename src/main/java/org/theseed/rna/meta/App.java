@@ -10,6 +10,7 @@ import org.theseed.utils.BaseProcessor;
  * pathway		find the paths between two metabolites
  * stats		produce successor-frequency statistics for a model
  * distance		report the distance of each metabolite from a target product
+ * reactions	report the reactions that produce a target product
  */
 public class App
 {
@@ -29,6 +30,9 @@ public class App
             break;
         case "distance" :
             processor = new DistanceProcessor();
+            break;
+        case "reactions" :
+            processor = new ReactionsProcessor();
             break;
         default:
             throw new RuntimeException("Invalid command " + command);
