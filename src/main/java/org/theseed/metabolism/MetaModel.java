@@ -15,8 +15,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Queue;
 import java.util.Set;
-import java.util.Stack;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
@@ -84,7 +85,7 @@ public class MetaModel {
     /** set of common compounds */
     private static Set<String> COMMONS = Set.of("h_c", "h_p", "h2o_c", "atp_c", "co2_c",
             "o2_c", "pi_c", "adp_c", "glu__D_c", "nadh_p", "nadh_c", "nad_c", "nadph_c",
-            "o2_p", "na1_p", "na1_c");
+            "o2_p", "na1_p", "na1_c", "h2o2_c");
 
     /**
      * This class is used to sort a distance map from lowest distance to highest.
@@ -103,28 +104,30 @@ public class MetaModel {
 
     /**
      * This class is used to sort pathways by shortest-to-target to longest-to-target.
-     * The constructor takes a model paining as input.
+     * The constructor takes a map of goals to model paintings as input.
      */
     public static class QSorter implements Comparator<Pathway> {
 
         /** map of distances for useful nodes */
-        private Map<String, Integer> distanceMap;
+        private Map<String, Map<String, Integer>> distanceMaps;
 
         /**
          * Construct a comparator for pathways using the specified distance map.
          *
-         * @param painting	distance map for ordering pathways
+         * @param goalMap	map of goal IDs to distance maps for ordering pathways
          */
-        public QSorter(Map<String, Integer> painting) {
-            this.distanceMap = painting;
+        public QSorter(TreeMap<String, Map<String, Integer>> goalMap) {
+            this.distanceMaps = goalMap;
         }
 
         @Override
         public int compare(Pathway o1, Pathway o2) {
             var terminus1 = o1.getLast().getOutput();
             var terminus2 = o2.getLast().getOutput();
-            Integer t1 = this.distanceMap.getOrDefault(terminus1, Integer.MAX_VALUE);
-            Integer t2 = this.distanceMap.getOrDefault(terminus2, Integer.MAX_VALUE);
+            var goalMap1 = this.distanceMaps.get(o1.getGoal());
+            var goalMap2 = this.distanceMaps.get(o2.getGoal());
+            Integer t1 = goalMap1.getOrDefault(terminus1, Integer.MAX_VALUE) + o1.size();
+            Integer t2 = goalMap2.getOrDefault(terminus2, Integer.MAX_VALUE) + o2.size();
             int retVal = t1 - t2;
             if (retVal == 0) {
                 retVal = o1.size() - o2.size();
@@ -136,6 +139,36 @@ public class MetaModel {
                     }
                 }
             }
+            return retVal;
+        }
+
+    }
+
+    /**
+     * This class is used to sort distances-to-target by shortest to longest.  It is used for the
+     * queue used in painting models, so we always find the shortest path first.
+     */
+    public static class QCSorter implements Comparator<String> {
+
+        /** map of compounds to distances */
+        private Map<String, Integer> distanceMap;
+
+        /**
+         * Construct a comparator from a distance map.
+         *
+         * @param distMap	distance map to use
+         */
+        public QCSorter(Map<String, Integer> distMap) {
+            this.distanceMap = distMap;
+        }
+
+        @Override
+        public int compare(String o1, String o2) {
+            int dist1 = this.distanceMap.getOrDefault(o1, Integer.MAX_VALUE);
+            int dist2 = this.distanceMap.getOrDefault(o2, Integer.MAX_VALUE);
+            int retVal = dist1 - dist2;
+            if (retVal == 0)
+                retVal = o1.compareTo(o2);
             return retVal;
         }
 
@@ -420,15 +453,15 @@ public class MetaModel {
      * @return a map from metabolite IDs to reaction counts
      */
     public Map<String, Integer> paintModel(String target, Set<String> commons) {
-        // This will be our processing stack.
-        Stack<String> stack = new Stack<String>();
         // This will be the return map.
         Map<String, Integer> retVal = new HashMap<String, Integer>(this.successorMap.size());
+        // This will be our processing queue.
+        Queue<String> stack = new PriorityQueue<String>(new QCSorter(retVal));
         // Prime the stack.
         retVal.put(target, 0);
-        stack.push(target);
-        while (! stack.empty()) {
-            String compound = stack.pop();
+        stack.add(target);
+        while (! stack.isEmpty()) {
+            String compound = stack.remove();
             int distance = retVal.get(compound) + 1;
             if (distance < MAX_PATH_LEN) {
                 Set<Reaction> producers = this.producerMap.getOrDefault(compound, NO_REACTIONS);
@@ -438,8 +471,9 @@ public class MetaModel {
                             .filter(x -> ! commons.contains(x) && ! retVal.containsKey(x))
                             .collect(Collectors.toList());
                     for (String input : inputs) {
+                        log.debug("Compound {} is at distance {}.", input, distance);
                         retVal.put(input, distance);
-                        stack.push(input);
+                        stack.add(input);
                     }
                 }
             }
@@ -483,9 +517,9 @@ public class MetaModel {
             for (Reaction starter : starters) {
                 var outputs = starter.getOutputs(bigg1);
                 for (Reaction.Stoich node : outputs)
-                    initial.add(new Pathway(starter, node));
+                    initial.add(new Pathway(starter, node, bigg2));
             }
-            retVal = findPathway(initial, bigg2, filter);
+            retVal = findPathway(initial, filter);
         }
         return retVal;
     }
@@ -498,8 +532,35 @@ public class MetaModel {
      * @param filter	pathway filter to use
      */
     public Pathway extendPathway(Pathway start, String bigg2, PathwayFilter filter) {
+        start.setGoal(bigg2);
         var initial = Collections.singleton(start);
-        return this.findPathway(initial, bigg2, filter);
+        return this.findPathway(initial, filter);
+    }
+
+    /**
+     * This method attempts to loop a pathway.  If the incoming pathway is normal,
+     * it is simply a special case of "extendPathway".  If the incoming pathway is
+     * reversible, however, we have to search from both ends of the pathway.
+     *
+     * @param path1		pathway to loop
+     * @param origin	target compound to loop back to
+     * @param filter	pathway filter to use
+     *
+     * @return			a looped pathway fulfilling the terms of the filter
+     */
+    public Pathway loopPathway(Pathway path1, String origin, PathwayFilter filter) {
+        List<Pathway> starters = new ArrayList<Pathway>(2);
+        if (path1.isReversible()) {
+            // Reverse the pathway and set a goal to get back to the old output.
+            String oldOutput = path1.getLast().getOutput();
+            Pathway path2 = path1.reverse(origin);
+            path2.setGoal(oldOutput);
+            starters.add(path2);
+        }
+        // Set a goal to extend the pathway back to the origin.
+        path1.setGoal(origin);
+        starters.add(path1);
+        return this.findPathway(starters, filter);
     }
 
     /**
@@ -507,47 +568,58 @@ public class MetaModel {
      * particular filter.
      *
      * @param initial	initial set of pathways to start from
-     * @param compound	target ending metabolite
      * @param filter	pathway filter to use for filtering
      *
      * @return the shortest pathway that satisfies all the criteria, or NULL if none
      * 		   was found
      */
-    private Pathway findPathway(Collection<Pathway> initial, String compound, PathwayFilter filter) {
-        // Verify that the end metabolite can be produced.
-        boolean endOk = this.producerMap.containsKey(compound);
-        if  (! endOk)
-            log.warn("No reactions produce metabolite \"" + compound + "\".");
+    private Pathway findPathway(Collection<Pathway> initial, PathwayFilter filter) {
         // Compute the common compounds.
         Set<String> commons = this.getCommons();
-        log.info("{} metabolites identified as common.", commons.size());
-        // Paint the model by the distance to the target.
-        Map<String, Integer> distanceMap = this.paintModel(compound, commons);
-        // We are doing a smart breadth-first search.  This will be our processing stack.
-        Comparator<Pathway> cmp = new QSorter(distanceMap);
-        PriorityQueue<Pathway> stack = new PriorityQueue<Pathway>(100, cmp);
-        // Fill the stack with the initial pathways.
-        stack.addAll(initial);
-        // Now process the stack until it is empty.
+        // Set up all the goal compounds.
+        var goalMap = new TreeMap<String, Map<String, Integer>>();
+        // This will hold the pathways we keep.
+        List<Pathway> paths = new ArrayList<Pathway>(initial.size());
+        for (Pathway path : initial) {
+            String goal = path.getGoal();
+            if (! this.producerMap.containsKey(goal))
+                log.warn("No reactions produce metabolite \"" + goal + "\".");
+            else {
+                // This is a feasible goal.  Save the pathway.
+                paths.add(path);
+                if (! goalMap.containsKey(goal)) {
+                    // Here we have a new goal compound.  We need a painting for it.
+                    goalMap.put(goal, this.paintModel(goal, commons));
+                }
+            }
+        }
+        // We are doing a smart breadth-first search.  This will be our processing queue.
+        Comparator<Pathway> cmp = new QSorter(goalMap);
+        PriorityQueue<Pathway> queue = new PriorityQueue<Pathway>(100, cmp);
+        // Fill the queue with the initial pathways.
+        queue.addAll(initial);
+        // Now process the queue until it is empty.
         int procCount = 0;
         int keptCount = 0;
         Pathway retVal = null;
-        while (! stack.isEmpty() && retVal == null) {
-            Pathway path = stack.poll();
-            // Get the last element for this pathway.
-            Pathway.Element terminus = path.getLast();
-            // Get the BiGG ID for the metabolite.
-            String outputId = terminus.getOutput();
+        while (! queue.isEmpty() && retVal == null) {
+            Pathway path = queue.remove();
             // If we have found our output, we need to check for includes.
-            if (outputId.equals(compound)) {
+            if (path.isComplete()) {
                 // If we keep the path, it terminates the loop.  If we decide it
                 // is missing a key reaction, the path dies and we keep looking
                 // for others.
                 if (filter.isGood(path))
                     retVal = path;
             } else {
+                // We have to keep going.  Get the last element for this pathway.
+                Pathway.Element terminus = path.getLast();
+                // Get the BiGG ID for the metabolite.
+                String outputId = terminus.getOutput();
                 // Get the reactions that use this metabolite.
                 Set<Reaction> successors = this.getSuccessors(outputId);
+                // Finally, get the painting for this path's goal.
+                var distanceMap = goalMap.get(path.getGoal());
                 // Now we extend the path.  We take care here not to re-add a
                 // reaction already in the path.  This is the third and final
                 // way a search can end.
@@ -561,7 +633,8 @@ public class MetaModel {
                             int dist = distanceMap.getOrDefault(output.getMetabolite(), MAX_PATH_LEN);
                             if (dist + path.size() < MAX_PATH_LEN) {
                                 Pathway newPath = path.clone().add(successor, output);
-                                stack.add(newPath);
+                                queue.add(newPath);
+                                log.debug("Queueing {}.", newPath);
                             }
                         }
                         keptCount++;
@@ -571,7 +644,7 @@ public class MetaModel {
             procCount++;
             if (log.isInfoEnabled() && procCount % 100000 == 0)
                 log.info("{} partial paths processed, {} kept.  Stack size = {}.",
-                        procCount, keptCount, stack.size());
+                        procCount, keptCount, queue.size());
         }
         return retVal;
     }

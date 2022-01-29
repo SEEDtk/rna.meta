@@ -123,4 +123,20 @@ public class MetaModelTest {
                 "b3736", "b3737", "b3738", "b3739"));
     }
 
+    @Test
+    public void testPainting() throws IOException {
+        File gFile = new File("data", "MG1655-wild.gto");
+        File mFile = new File("data", "ecoli_cc.json");
+        Genome genome = new Genome(gFile);
+        MetaModel model = new MetaModel(mFile, genome);
+        Set<String> commons = model.getCommons();
+        Map<String, Integer> painting = model.paintModel("mal__L_c", commons);
+        assertThat(painting.get("oaa_c"), equalTo(1));
+        assertThat(painting.get("glx_c"), equalTo(1));
+        assertThat(painting.get("fum_c"), equalTo(1));
+        assertThat(painting.get("acon_C_c"), equalTo(3));
+        assertThat(painting.get("succ_c"), equalTo(2));
+        assertThat(painting.get("icit_c"), equalTo(2));
+    }
+
 }

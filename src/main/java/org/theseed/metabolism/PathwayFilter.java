@@ -17,6 +17,10 @@ import org.theseed.utils.ParseFailureException;
  */
 public abstract class PathwayFilter {
 
+    // FIELDS
+    /** static no-filtering option */
+    public static final PathwayFilter NONE = new PathwayFilter.None();
+
     /**
      * This interface represents the methods a client must support to build a
      * filter.

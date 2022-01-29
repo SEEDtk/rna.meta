@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A pathway is an ordered set of reactions from one gene to another.  The rule is
@@ -22,6 +24,8 @@ public class Pathway implements Iterable<Pathway.Element> {
     // FIELDS
     /** ordered list of pathway elements */
     private List<Element> elements;
+    /** pathway goal compound */
+    private String goal;
 
     /**
      * This represents a single reaction element of the pathway.
@@ -37,11 +41,31 @@ public class Pathway implements Iterable<Pathway.Element> {
 
         /**
          * Create a new element for a pathway.
+         *
+         * @param reaction	reaction to use
+         * @param node		desired output node
          */
         public Element(Reaction reaction, Reaction.Stoich node) {
             this.reaction = reaction;
             this.output = node.getMetabolite();
             this.reversed = ! node.isProduct();
+        }
+
+        /**
+         * Create a new element by reversing an old one.
+         *
+         * @param old		element to reverse
+         * @param output	desired output compound
+         *
+         * @throws IllegalArgumentException 	if the reaction is not reversible
+         */
+        protected Element(Element old, String output) {
+            this.reaction = old.reaction;
+            if (! this.reaction.isReversible())
+                throw new IllegalArgumentException("Attempt to reverse irreversible reaction " + this.reaction.getBiggId()
+                        + ".");
+            this.reversed = ! old.reversed;
+            this.output = output;
         }
 
         /**
@@ -65,8 +89,12 @@ public class Pathway implements Iterable<Pathway.Element> {
             return this.reaction;
         }
 
-    }
+        @Override
+        public String toString() {
+            return "-(" + this.reaction.getBiggId() + ")" + this.output;
+        }
 
+    }
 
     /**
      * Construct an empty pathway.
@@ -84,6 +112,19 @@ public class Pathway implements Iterable<Pathway.Element> {
     public Pathway(Reaction reaction, Reaction.Stoich node) {
         this.elements = new ArrayList<Element>();
         add(reaction, node);
+    }
+
+    /**
+     * Construct a pathway from a single reaction element and specify a goal
+     *
+     * @param reaction	first reaction in pathway
+     * @param stoich	stoichiometric element for computing output
+     * @param goal		target output compound
+     */
+    public Pathway(Reaction reaction, Reaction.Stoich node, String goal) {
+        this.elements = new ArrayList<Element>();
+        add(reaction, node);
+        this.goal = goal;
     }
 
     /**
@@ -114,6 +155,41 @@ public class Pathway implements Iterable<Pathway.Element> {
     public Pathway clone() {
         Pathway retVal = new Pathway();
         this.elements.stream().forEach(x -> retVal.elements.add(x));
+        retVal.goal = this.goal;
+        return retVal;
+    }
+
+    /**
+     * @return TRUE if this pathway is reversible
+     */
+    public boolean isReversible() {
+        boolean retVal = this.elements.stream().allMatch(x -> x.getReaction().isReversible());
+        return retVal;
+    }
+
+    /**
+     * Attempt to reverse this pathway.  If the pathway is not reversible, an IllegalArgumentException
+     * will be thrown.
+     *
+     * @param output	proposed new output
+     *
+     * @return the reverse of this pathway
+     *
+     */
+    public Pathway reverse(String output) {
+        // Create the new pathway.
+        Pathway retVal = new Pathway();
+        // Compute the new outputs for each reaction.
+        String[] outputs = new String[this.size()];
+        outputs[0] = output;
+        final int n = this.size() - 1;
+        for (int i = 1; i <= n; i++)
+            outputs[i] = this.getElement(i-1).output;
+        // Now assembly the reactions in reverse order.
+        for (int i = n; i >= 0; i--) {
+            Element reversed = new Element(this.getElement(i), outputs[i]);
+            retVal.elements.add(reversed);
+        }
         return retVal;
     }
 
@@ -169,6 +245,42 @@ public class Pathway implements Iterable<Pathway.Element> {
             retVal = found;
         }
         return retVal;
+    }
+
+    /**
+     * @return a stream of the pathway elements
+     */
+    public Stream<Element> stream() {
+        return this.elements.stream();
+    }
+
+    /**
+     * Specify the goal compound for this pathway.
+     *
+     * @param goal 	the desired output compound
+     */
+    public void setGoal(String goal) {
+        this.goal = goal;
+    }
+
+    /**
+     * @return TRUE if this pathway has reached its goal
+     */
+    public boolean isComplete() {
+        String terminus = this.getLast().getOutput();
+        return terminus.contentEquals(goal);
+    }
+
+    /**
+     * @return the goal compound
+     */
+    public String getGoal() {
+        return this.goal;
+    }
+
+    @Override
+    public String toString() {
+        return "path[" + this.elements.stream().map(x -> x.toString()).collect(Collectors.joining("-->")) + "]";
     }
 
 }

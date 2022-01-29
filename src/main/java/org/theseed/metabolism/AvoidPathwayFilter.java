@@ -23,6 +23,17 @@ public class AvoidPathwayFilter extends PathwayFilter {
         this.prohibited = new TreeSet<String>(processor.getAvoid());
     }
 
+    /**
+     * Create a pathway filter for avoiding compounds in a specific set
+     *
+     * @param prohibit	array of prohibited compounds
+     */
+    public AvoidPathwayFilter(String... prohibit) {
+        this.prohibited = new TreeSet<String>();
+        for (String compound : prohibit)
+            this.prohibited.add(compound);
+    }
+
     @Override
     public boolean isPossible(Pathway path) {
         // We only check the terminus, since this method is called after each

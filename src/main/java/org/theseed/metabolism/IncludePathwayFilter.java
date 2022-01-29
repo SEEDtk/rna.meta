@@ -24,7 +24,34 @@ public class IncludePathwayFilter extends PathwayFilter {
         this.required = new TreeSet<String>(processor.getInclude());
         MetaModel model = processor.getModel();
         // Validate the reaction list.
-        for (String reactionId : required) {
+        checkRequired(model);
+    }
+
+    /**
+     * Create a pathway filter that requires the specified reactions.
+     *
+     * @param model		relevant metabolic model
+     * @param includes	array of bigg IDs for the reactions to include
+     *
+     * @throws ParseFailureException
+     */
+    public IncludePathwayFilter(MetaModel model, String... includes) throws ParseFailureException {
+        this.required = new TreeSet<String>();
+        for (String reaction : includes)
+            this.required.add(reaction);
+        // Validate the reaction list.
+        this.checkRequired(model);
+    }
+
+    /**
+     * Validate the reaction list.
+     *
+     * @param model		target model for validation
+     *
+     * @throws ParseFailureException
+     */
+    private void checkRequired(MetaModel model) throws ParseFailureException {
+        for (String reactionId : this.required) {
             if (model.getReaction(reactionId) == null)
                 throw new ParseFailureException("Reaction \"" + reactionId +
                         " \" not found in model.");
