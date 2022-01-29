@@ -452,28 +452,58 @@ public class MetaModel {
      *
      * @return a map from metabolite IDs to reaction counts
      */
-    public Map<String, Integer> paintModel(String target, Set<String> commons) {
+    public Map<String, Integer> paintProducers(String target, Set<String> commons) {
+        Map<String, Integer> retVal = calculateConnections(target, commons, this.producerMap);
+        return retVal;
+    }
+
+    /**
+     * This method computes the minimum reaction distance to each metabolite from a
+     * source metabolite.
+     *
+     * @param source	BiGG ID of the source metabolite
+     * @param commons	set of common compounds to ignore
+     *
+     * @return a map from metabolite IDs to reaction counts
+     */
+    public Map<String, Integer> paintConsumers(String target, Set<String> commons) {
+        Map<String, Integer> retVal = calculateConnections(target, commons, this.successorMap);
+        return retVal;
+    }
+
+    /**
+     * This method computes the minimum reaction distance between each other metabolite and
+     * a target metabolite, with the direction determined by the incoming map-- producer
+     * or successor.
+     *
+     * @param target			BiGG ID of the target metabolite
+     * @param commons			set of common compounds to ignore
+     * @param connectionMap		connection map to use (determines direction)
+     *
+     * @return a map from metabolite IDs to reaction counts
+     */
+    protected Map<String, Integer> calculateConnections(String target, Set<String> commons,
+            Map<String, Set<Reaction>> connectionMap) {
         // This will be the return map.
-        Map<String, Integer> retVal = new HashMap<String, Integer>(this.successorMap.size());
+        Map<String, Integer> retVal = new HashMap<String, Integer>(this.metaboliteMap.size());
         // This will be our processing queue.
-        Queue<String> stack = new PriorityQueue<String>(new QCSorter(retVal));
-        // Prime the stack.
+        Queue<String> queue = new PriorityQueue<String>(new QCSorter(retVal));
+        // Prime the queue.
         retVal.put(target, 0);
-        stack.add(target);
-        while (! stack.isEmpty()) {
-            String compound = stack.remove();
+        queue.add(target);
+        while (! queue.isEmpty()) {
+            String compound = queue.remove();
             int distance = retVal.get(compound) + 1;
             if (distance < MAX_PATH_LEN) {
-                Set<Reaction> producers = this.producerMap.getOrDefault(compound, NO_REACTIONS);
+                Set<Reaction> producers = connectionMap.getOrDefault(compound, NO_REACTIONS);
                 for (Reaction producer : producers) {
                     var inputs = producer.getOutputs(compound).stream()
                             .map(x -> x.getMetabolite())
                             .filter(x -> ! commons.contains(x) && ! retVal.containsKey(x))
                             .collect(Collectors.toList());
                     for (String input : inputs) {
-                        log.debug("Compound {} is at distance {}.", input, distance);
                         retVal.put(input, distance);
-                        stack.add(input);
+                        queue.add(input);
                     }
                 }
             }
@@ -589,7 +619,7 @@ public class MetaModel {
                 paths.add(path);
                 if (! goalMap.containsKey(goal)) {
                     // Here we have a new goal compound.  We need a painting for it.
-                    goalMap.put(goal, this.paintModel(goal, commons));
+                    goalMap.put(goal, this.paintProducers(goal, commons));
                 }
             }
         }
@@ -634,7 +664,6 @@ public class MetaModel {
                             if (dist + path.size() < MAX_PATH_LEN) {
                                 Pathway newPath = path.clone().add(successor, output);
                                 queue.add(newPath);
-                                log.debug("Queueing {}.", newPath);
                             }
                         }
                         keptCount++;

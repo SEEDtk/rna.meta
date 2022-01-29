@@ -130,13 +130,19 @@ public class MetaModelTest {
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
         Set<String> commons = model.getCommons();
-        Map<String, Integer> painting = model.paintModel("mal__L_c", commons);
+        Map<String, Integer> painting = model.paintProducers("mal__L_c", commons);
         assertThat(painting.get("oaa_c"), equalTo(1));
         assertThat(painting.get("glx_c"), equalTo(1));
         assertThat(painting.get("fum_c"), equalTo(1));
         assertThat(painting.get("acon_C_c"), equalTo(3));
         assertThat(painting.get("succ_c"), equalTo(2));
         assertThat(painting.get("icit_c"), equalTo(2));
+        painting = model.paintConsumers("mal__L_c", commons);
+        assertThat(painting.get("oaa_c"), equalTo(1));
+        assertThat(painting.get("glx_c"), equalTo(4));
+        assertThat(painting.get("fum_c"), equalTo(1));
+        assertThat(painting.get("acon_C_c"), equalTo(3));
+        assertThat(painting.get("accoa_c"), equalTo(2));
     }
 
 }

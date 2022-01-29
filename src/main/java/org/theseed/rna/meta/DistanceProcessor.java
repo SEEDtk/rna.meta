@@ -79,7 +79,7 @@ public class DistanceProcessor extends BaseModelReportProcessor {
         Set<String> commons = model.getCommons();
         // Paint the model with the distances.
         log.info("Computing distances to {}.", this.outputId);
-        Map<String, Integer> distanceMap = model.paintModel(this.outputId, commons);
+        Map<String, Integer> distanceMap = model.paintProducers(this.outputId, commons);
         log.info("{} metabolites were connected.", distanceMap.size());
         // Sort the distances.
         var distances = new ArrayList<Map.Entry<String, Integer>>(distanceMap.entrySet());

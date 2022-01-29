@@ -29,9 +29,6 @@ public class PathwayQueryTest {
         File mFile = new File("data", "ecoli_cc.json");
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
-        // Model xmlModel = SBMLReader.read(sbmlFile).getModel();
-        // File sbmlFile = new File("data", "iML1515.xml");
-        // model.importSbml(xmlModel);
         // Now we have a full-blown model.  Test query 1:  A to B.
         Pathway path1 = model.getPathway("succ_c", "icit_c", PathwayFilter.NONE);
         assertThat(path1.getLast().getOutput(), equalTo("icit_c"));
@@ -45,9 +42,9 @@ public class PathwayQueryTest {
         validatePath(path3, "icit_c", "mal__L_c");
         checkAvoid(path3, "glx_c");
         // Use an include filter.
-        path3 = model.getPathway("icit_c", "mal__L_c", new IncludePathwayFilter(model, "CITL"));
-        validatePath(path3, "icit_c", "mal__L_c");
-        checkReactions(path3, "CITL");
+        Pathway path4 = model.getPathway("icit_c", "mal__L_c", new IncludePathwayFilter(model, "CITL"));
+        validatePath(path4, "icit_c", "mal__L_c");
+        checkReactions(path4, "CITL");
         // Test query 4: A to A via B.  This involves extending path1 back to A.
         path2 = model.loopPathway(path1, "succ_c", PathwayFilter.NONE);
         validatePath(path2, "succ_c", "succ_c");
