@@ -7,6 +7,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import java.io.File;
 import java.io.IOException;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
@@ -23,16 +24,17 @@ public class TestPathMap {
     /** logging facility */
     protected static Logger log = LoggerFactory.getLogger(TestPathMap.class);
 
-
     @Test
     public void testPathMap() throws IOException {
         File gFile = new File("data", "MG1655-wild.gto");
         File mFile = new File("data", "ecoli_cc.json");
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
-        ModelPathMap pathMap = new ModelPathMap(model);
-        // Verify that all the paths are valid.
-        var compounds = model.getInputCompounds();
+        Set<String> compounds = Set.of("fum_c", "mal__L_c", "oaa_c", "cit_c", "acon_C_c", "icit_c", "akg_c",
+                "succoa_c", "succ_c", "glx_c");
+        ModelPathMap pathMap = new ModelPathMap(model, compounds);
+        // Verify that all the paths are valid and accumulate the score for oaa_c.
+        int oaa_c_score = 0;
         for (String source : compounds) {
             for (String target : compounds) {
                 Pathway path = pathMap.getPath(source, target);
@@ -50,10 +52,22 @@ public class TestPathMap {
                                 .collect(Collectors.toSet());
                         current = element.getOutput();
                         assertThat(pathName, outputs, hasItem(current));
+                        // If this is a middle element, check the score.
+                        if (! current.equals(target) && current.equals("oaa_c"))
+                            oaa_c_score++;
                     }
                 }
             }
         }
+        // Get the path from "fum_c" to "glx_c".
+        Pathway path1 = pathMap.getPath("fum_c", "glx_c");
+        var middles = path1.getIntermediates();
+        assertThat(middles.size(), equalTo(path1.size() - 1));
+        assertThat(middles, not(hasItem("glx_c")));
+        assertThat(middles, containsInAnyOrder("icit_c", "oaa_c", "akg_c", "mqn8_c"));
+        // Now verify the score.
+        int score = pathMap.getScore("oaa_c");
+        assertThat(score, equalTo(oaa_c_score));
     }
 
 }

@@ -8,8 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.stream.IntStream;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.theseed.counters.CountMap;
@@ -34,23 +32,22 @@ public class ModelPathMap {
 
 
     /**
-     * Construct a model pathway map for a specific metabolic model.
+     * Construct a model pathway map for a specific metabolic model and specific metabolites.
      *
-     * @param model		source metabolic model
+     * @param model				source metabolic model
+     * @param compounds			set of compounds of interest
      */
-    public ModelPathMap(MetaModel model) {
+    public ModelPathMap(MetaModel model, Set<String> compounds) {
         // Get the common compounds.
         Set<String> commons = model.getCommons();
-        // Create the path map and the count map.
-        Set<String> inputCompounds = model.getInputCompounds();
-        this.pathMap = new HashMap<String, Map<String, Pathway>>(inputCompounds.size() * 4 / 3 + 1);
+        this.pathMap = new HashMap<String, Map<String, Pathway>>(compounds.size() * 4 / 3 + 1);
         this.scoreMap = new CountMap<String>();
         // Compute the size for each compound's sub-map.
         final int mapSize = model.getProductCount() * 4 / 3 + 1;
         // We will emit progress reports every 30 seconds.
         long lastLog = System.currentTimeMillis();
         int pathCount = 0;
-        for (String compound : model.getInputCompounds()) {
+        for (String compound : compounds) {
             // Create the output map for this compound.
             var subMap = new HashMap<String, Pathway>(mapSize);
             this.pathMap.put(compound, subMap);
@@ -61,7 +58,7 @@ public class ModelPathMap {
             for (Reaction successor : successors) {
                 var outputs = successor.getOutputs(compound);
                 for (Reaction.Stoich node : outputs) {
-                    this.record(queue, subMap, new Pathway(successor, node));
+                    this.record(queue, subMap, new Pathway(successor, node), compounds);
                     pathCount++;
                 }
             }
@@ -79,7 +76,7 @@ public class ModelPathMap {
                             // Only extend this path if we have not seen this compound before.
                             if (! subMap.containsKey(node.getMetabolite())) {
                                 var path1 = path.clone().add(successor, node);
-                                this.record(queue, subMap, path1);
+                                this.record(queue, subMap, path1, compounds);
                                 pathCount++;
                             }
                         }
@@ -87,7 +84,7 @@ public class ModelPathMap {
                         if (log.isInfoEnabled()) {
                             long now = System.currentTimeMillis();
                             if (now - lastLog >= 30000L) {
-                                log.info("{} paths found.", pathCount);
+                                log.info("{} paths checked.", pathCount);
                                 lastLog = now;
                             }
                         }
@@ -107,16 +104,22 @@ public class ModelPathMap {
      * @param queue		processing queue for the map build
      * @param subMap	output map for the starting compound
      * @param pathway	pathway to record
+     * @param targets	set of compounds of interest
      */
-    private void record(PriorityQueue<Pathway> queue, HashMap<String, Pathway> subMap, Pathway pathway) {
+    private void record(PriorityQueue<Pathway> queue, HashMap<String, Pathway> subMap, Pathway pathway,
+            Set<String> targets) {
         // Get the pathway terminus.
         String terminus = pathway.getLast().getOutput();
-        // Add the pathway to the processing queue and to the output map.
+        // Add the pathway to the processing queue and the output map.
         queue.add(pathway);
         subMap.put(terminus, pathway);
-        // Now count all the middle nodes.
-        IntStream.range(0, pathway.size() - 1).mapToObj(i -> pathway.getElement(i))
-                .forEach(x -> this.scoreMap.count(x.getOutput()));
+        // If the terminus is one of the ones we care about, add this pathway to the output map and
+        // count the middle nodes.
+        if (targets.contains(terminus)) {
+            // Now count all the middle nodes.
+            for (String compound : pathway.getIntermediates())
+                this.scoreMap.count(compound);
+        }
     }
 
     /**
@@ -147,7 +150,7 @@ public class ModelPathMap {
      *
      * @param compound	compound of interest
      */
-    public double getScore(String compound) {
+    public int getScore(String compound) {
         return this.scoreMap.getCount(compound);
     }
 

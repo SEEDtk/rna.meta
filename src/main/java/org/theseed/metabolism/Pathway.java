@@ -9,6 +9,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
@@ -301,6 +302,15 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
     public boolean isComplete() {
         String terminus = this.getLast().getOutput();
         return terminus.contentEquals(goal);
+    }
+
+    /**
+     * @return the set of intermediate compounds for this pathway
+     */
+    public Set<String> getIntermediates() {
+        var retVal = IntStream.range(0, this.size() - 1).mapToObj(i -> this.getElement(i).getOutput())
+                .collect(Collectors.toSet());
+        return retVal;
     }
 
     /**

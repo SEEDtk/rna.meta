@@ -85,7 +85,7 @@ public class MetaModel {
     /** set of common compounds */
     private static Set<String> COMMONS = Set.of("h_c", "h_p", "h2o_c", "atp_c", "co2_c",
             "o2_c", "pi_c", "adp_c", "glu__D_c", "nadh_p", "nadh_c", "nad_c", "nadph_c",
-            "o2_p", "na1_p", "na1_c", "h2o2_c");
+            "o2_p", "na1_p", "na1_c", "h2o2_c", "h2_c");
 
     /**
      * This class is used to sort a distance map from lowest distance to highest.
