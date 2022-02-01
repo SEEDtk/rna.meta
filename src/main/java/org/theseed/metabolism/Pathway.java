@@ -4,6 +4,7 @@
 package org.theseed.metabolism;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -19,7 +20,7 @@ import java.util.stream.Stream;
  * @author Bruce Parrello
  *
  */
-public class Pathway implements Iterable<Pathway.Element> {
+public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
 
     // FIELDS
     /** ordered list of pathway elements */
@@ -28,9 +29,10 @@ public class Pathway implements Iterable<Pathway.Element> {
     private String goal;
 
     /**
-     * This represents a single reaction element of the pathway.
+     * This represents a single reaction element of the pathway.  Elements are sorted by reaction ID, then
+     * output metabolite, and finally with unreversed before reversed.
      */
-    public static class Element {
+    public static class Element implements Comparable<Element> {
 
         /** TRUE if the reaction is reversed */
         private boolean reversed;
@@ -89,9 +91,29 @@ public class Pathway implements Iterable<Pathway.Element> {
             return this.reaction;
         }
 
+        /**
+         * @return the set of input compounds for this element
+         */
+        public Set<String> getInputs() {
+            Collection<Reaction.Stoich> inputNodes = this.reaction.getOutputs(this.output);
+            Set<String> retVal = inputNodes.stream().map(x -> x.getMetabolite()).collect(Collectors.toSet());
+            return retVal;
+        }
+
         @Override
         public String toString() {
             return "-(" + this.reaction.getBiggId() + ")" + this.output;
+        }
+
+        @Override
+        public int compareTo(Element o) {
+            int retVal = this.reaction.getBiggId().compareTo(o.reaction.getBiggId());
+            if (retVal == 0) {
+                retVal = this.output.compareTo(o.output);
+                if (retVal == 0)
+                    retVal = Boolean.compare(this.reversed, o.reversed);
+            }
+            return retVal;
         }
 
     }
@@ -204,6 +226,16 @@ public class Pathway implements Iterable<Pathway.Element> {
         return retVal;
     }
 
+    /**
+     * @return the first pathway element
+     */
+    public Element getFirst() {
+        Element retVal = null;
+        if (! this.elements.isEmpty())
+            retVal = this.elements.get(0);
+        return retVal;
+    }
+
     @Override
     public Iterator<Element> iterator() {
         return this.elements.iterator();
@@ -281,6 +313,19 @@ public class Pathway implements Iterable<Pathway.Element> {
     @Override
     public String toString() {
         return "path[" + this.elements.stream().map(x -> x.toString()).collect(Collectors.joining("-->")) + "]";
+    }
+
+    @Override
+    public int compareTo(Pathway o) {
+        // We sort the shortest pathway first.
+        int retVal = this.size() - o.size();
+        if (retVal == 0) {
+            // Here the pathways are the same number of elements.  Compare each element until we find a difference.
+            final int n = this.size();
+            for (int i = 0; retVal == 0 && i < n; i++)
+                retVal = this.elements.get(i).compareTo(o.elements.get(i));
+        }
+        return retVal;
     }
 
 }

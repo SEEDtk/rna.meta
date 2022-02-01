@@ -837,4 +837,18 @@ public class MetaModel {
         return this.getProducerMap();
     }
 
+    /**
+     * @return the estimated number of paths
+     */
+    public int getProductCount() {
+        return this.producerMap.size();
+    }
+
+    /**
+     * @return the set of compounds that have successor reactions
+     */
+    public Set<String> getInputCompounds() {
+        return this.successorMap.keySet();
+    }
+
 }
