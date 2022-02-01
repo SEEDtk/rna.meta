@@ -5,9 +5,12 @@ package org.theseed.metabolism;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -276,6 +279,33 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
                     found = true;
             }
             retVal = found;
+        }
+        return retVal;
+    }
+
+    /**
+     * @return a count map for the number of branches off of each intermediate node in the pathway
+     *
+     * @param model		the model in which the pathway occurs
+     */
+    public Map<String, Set<Reaction>> getBranches(MetaModel model) {
+        var retVal = new HashMap<String, Set<Reaction>>(this.size() * 4 / 3);
+        final int n = this.size() - 1;
+        for (int i = 0; i < n; i++) {
+            // Get the output compounds for this step and the next step.
+            String intermediate = this.elements.get(i).output;
+            String next = this.elements.get(i+1).output;
+            // The branch count is the number of successor reactions to this step's
+            // output that do NOT lead to next step's output.
+            var reactions = model.getSuccessors(intermediate);
+            for (Reaction reaction : reactions) {
+                boolean isBranch = reaction.getOutputs(intermediate).stream()
+                        .allMatch(x -> ! x.getMetabolite().equals(next));
+                if (isBranch) {
+                    var branchSet = retVal.computeIfAbsent(intermediate, x -> new TreeSet<Reaction>());
+                    branchSet.add(reaction);
+                }
+            }
         }
         return retVal;
     }

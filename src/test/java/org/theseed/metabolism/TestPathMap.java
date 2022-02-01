@@ -68,6 +68,33 @@ public class TestPathMap {
         // Now verify the score.
         int score = pathMap.getScore("oaa_c");
         assertThat(score, equalTo(oaa_c_score));
+        // Get the branch counts.
+        var branchMap = path1.getBranches(model);
+        assertThat(branchMap.size(), lessThanOrEqualTo(middles.size()));
+        var branches = branchMap.get("mqn8_c");
+        assertThat(branches, nullValue());
+        var successors = model.getSuccessors("mqn8_c");
+        assertThat(successors.size(), equalTo(1));
+        branches = branchMap.get("oaa_c");
+        this.validateBranches(branches, "oaa_c", "akg_c");
+        branches = branchMap.get("akg_c");
+        this.validateBranches(branches, "akg_c", "icit_c");
+        branches = branchMap.get("icit_c");
+        this.validateBranches(branches, "icit_c", "glx_c");
+    }
+
+    /**
+     * Insure all the branches in the specified branch set do not terminate in the specified target.
+     *
+     * @param branches		set of branch reactions
+     * @param source		source compound
+     * @param target		target compound
+     */
+    private void validateBranches(Set<Reaction> branches, String source, String target) {
+        for (Reaction branch : branches) {
+            var outputs = branch.getOutputs(source).stream().map(x -> x.getMetabolite()).collect(Collectors.toSet());
+            assertThat(branch.toString(), outputs, not(hasItem(target)));
+        }
     }
 
 }
