@@ -30,11 +30,11 @@ public class PathwayQueryTest {
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
         // Now we have a full-blown model.  Test query 1:  A to B.
-        Pathway path1 = model.getPathway("succ_c", "icit_c", PathwayFilter.NONE);
+        Pathway path1 = model.getPathway("succ_c", "icit_c");
         assertThat(path1.getLast().getOutput(), equalTo("icit_c"));
         validatePath(path1, "succ_c", "icit_c");
         // Test query 2:  A to C via B.  This involves extending path1 to C.
-        Pathway path2 = model.extendPathway(path1, "glu__L_c", PathwayFilter.NONE);
+        Pathway path2 = model.extendPathway(path1, "glu__L_c");
         validatePath(path2, "succ_c", "glu__L_c");
         checkInclude(path2, "icit_c");
         // Test query 3: A to B avoiding C.
@@ -46,7 +46,7 @@ public class PathwayQueryTest {
         validatePath(path4, "icit_c", "mal__L_c");
         checkReactions(path4, "CITL");
         // Test query 4: A to A via B.  This involves extending path1 back to A.
-        path2 = model.loopPathway(path1, "succ_c", PathwayFilter.NONE);
+        path2 = model.loopPathway(path1, "succ_c");
         validatePath(path2, "succ_c", "succ_c");
         checkInclude(path2, "icit_c");
         // Test query 5: A to A via B avoiding C.  This involves extending path3 back to A.

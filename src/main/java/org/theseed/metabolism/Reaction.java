@@ -316,6 +316,16 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
+     * @return TRUE if the specified metabolite is a product of this reaction
+     *
+     * @param compound	metabolite to check
+     */
+    public boolean isProduct(String compound) {
+        boolean retVal = this.metabolites.stream().anyMatch(x -> x.isProduct() && x.getMetabolite().contentEquals(compound));
+        return retVal;
+    }
+
+    /**
      * @return the aliases for the genes that relate to this reaction
      */
     public Set<String> getGenes() {
@@ -357,8 +367,10 @@ public class Reaction implements Comparable<Reaction> {
 
     /**
      * @return the reaction formula as a string
+     *
+     * @param reverse	TRUE to reverse the reaction
      */
-    public String getFormula() {
+    public String getFormula(boolean reverse) {
         // We build the left and right separately and join them at the end.
         List<String> left = new ArrayList<String>(this.metabolites.size());
         List<String> right = new ArrayList<String>(this.metabolites.size());
@@ -369,12 +381,13 @@ public class Reaction implements Comparable<Reaction> {
                 part = stoich.getMetabolite();
             else
                 part = String.format("%d*%s", coeff, stoich.getMetabolite());
-            if (stoich.isProduct())
+            if (stoich.isProduct() != reverse)
                 right.add(part);
             else
                 left.add(part);
         }
-        String retVal = StringUtils.join(left, " + ") + " --> "
+        String connector = (this.reversible ? "<->" : "-->");
+        String retVal = StringUtils.join(left, " + ") + " " + connector + " "
                 + StringUtils.join(right, " + ");
         return retVal;
     }

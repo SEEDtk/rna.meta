@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -532,9 +533,9 @@ public class MetaModel {
      *
      * @param bigg1		BiGG ID of start metabolite
      * @param bigg2		BiGG ID of end metabolite
-     * @param filter	pathway filter to use
+     * @param filters	list of pathway filters to use
      */
-    public Pathway getPathway(String bigg1, String bigg2, PathwayFilter filter) {
+    public Pathway getPathway(String bigg1, String bigg2, PathwayFilter... filters) {
         // This will hold the return pathway.
         Pathway retVal = null;
         // Get the starting reactions.
@@ -549,7 +550,7 @@ public class MetaModel {
                 for (Reaction.Stoich node : outputs)
                     initial.add(new Pathway(starter, node, bigg2));
             }
-            retVal = findPathway(initial, filter);
+            retVal = this.findPathway(initial, filters);
         }
         return retVal;
     }
@@ -559,12 +560,12 @@ public class MetaModel {
      *
      * @param start		initial pathway to extend
      * @param bigg2		BiGG ID of end metabolite
-     * @param filter	pathway filter to use
+     * @param filters	pathway filters to use
      */
-    public Pathway extendPathway(Pathway start, String bigg2, PathwayFilter filter) {
+    public Pathway extendPathway(Pathway start, String bigg2, PathwayFilter... filters) {
         start.setGoal(bigg2);
         var initial = Collections.singleton(start);
-        return this.findPathway(initial, filter);
+        return this.findPathway(initial, filters);
     }
 
     /**
@@ -574,11 +575,11 @@ public class MetaModel {
      *
      * @param path1		pathway to loop
      * @param origin	target compound to loop back to
-     * @param filter	pathway filter to use
+     * @param filters	pathway filters to use
      *
      * @return			a looped pathway fulfilling the terms of the filter
      */
-    public Pathway loopPathway(Pathway path1, String origin, PathwayFilter filter) {
+    public Pathway loopPathway(Pathway path1, String origin, PathwayFilter... filters) {
         List<Pathway> starters = new ArrayList<Pathway>(2);
         if (path1.isReversible()) {
             // Reverse the pathway and set a goal to get back to the old output.
@@ -590,7 +591,7 @@ public class MetaModel {
         // Set a goal to extend the pathway back to the origin.
         path1.setGoal(origin);
         starters.add(path1);
-        return this.findPathway(starters, filter);
+        return this.findPathway(starters, filters);
     }
 
     /**
@@ -598,12 +599,12 @@ public class MetaModel {
      * particular filter.
      *
      * @param initial	initial set of pathways to start from
-     * @param filter	pathway filter to use for filtering
+     * @param filter	pathway filters to use
      *
      * @return the shortest pathway that satisfies all the criteria, or NULL if none
      * 		   was found
      */
-    private Pathway findPathway(Collection<Pathway> initial, PathwayFilter filter) {
+    private Pathway findPathway(Collection<Pathway> initial, PathwayFilter... filters) {
         // Compute the common compounds.
         Set<String> commons = this.getCommons();
         // Set up all the goal compounds.
@@ -639,7 +640,7 @@ public class MetaModel {
                 // If we keep the path, it terminates the loop.  If we decide it
                 // is missing a key reaction, the path dies and we keep looking
                 // for others.
-                if (filter.isGood(path))
+                if (Arrays.stream(filters).allMatch(x -> x.isGood(path)))
                     retVal = path;
             } else {
                 // We have to keep going.  Get the last element for this pathway.
@@ -663,7 +664,8 @@ public class MetaModel {
                             int dist = distanceMap.getOrDefault(output.getMetabolite(), MAX_PATH_LEN);
                             if (dist + path.size() < MAX_PATH_LEN) {
                                 Pathway newPath = path.clone().add(successor, output);
-                                queue.add(newPath);
+                                if (Arrays.stream(filters).allMatch(x -> x.isPossible(newPath)))
+                                    queue.add(newPath);
                             }
                         }
                         keptCount++;

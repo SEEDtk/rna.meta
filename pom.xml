@@ -60,7 +60,7 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>1.2.3</version>
+            <version>1.2.10</version>
         </dependency>
         <dependency>
           <groupId>com.github.cliftonlabs</groupId>
@@ -110,13 +110,13 @@
                   </exclusion>
             </exclusions>
         </dependency>
-		<!-- https://mvnrepository.com/artifact/org.sbml.jsbml.ext/jsbml-fbc -->
-		<dependency>
-		    <groupId>org.sbml.jsbml.ext</groupId>
-		    <artifactId>jsbml-fbc</artifactId>
-		    <version>1.6.1</version>
-		</dependency>
-		<!-- Testing dependencies-->
+        <!-- https://mvnrepository.com/artifact/org.sbml.jsbml.ext/jsbml-fbc -->
+        <dependency>
+            <groupId>org.sbml.jsbml.ext</groupId>
+            <artifactId>jsbml-fbc</artifactId>
+            <version>1.6.1</version>
+        </dependency>
+        <!-- Testing dependencies-->
         <dependency>
           <groupId>org.hamcrest</groupId>
           <artifactId>hamcrest</artifactId>

@@ -4,15 +4,12 @@
 package org.theseed.rna.meta;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -23,9 +20,6 @@ import org.theseed.counters.CountMap;
 import org.theseed.excel.CustomWorkbook;
 import org.theseed.genome.Feature;
 import org.theseed.genome.Genome;
-import org.theseed.java.erdb.DbConnection;
-import org.theseed.java.erdb.DbQuery;
-import org.theseed.java.erdb.Relop;
 import org.theseed.metabolism.MetaModel;
 import org.theseed.metabolism.Pathway;
 import org.theseed.metabolism.PathwayFilter;
@@ -34,13 +28,13 @@ import org.theseed.metabolism.Reaction;
 import org.theseed.utils.ParseFailureException;
 
 /**
- * This command computes the shortest pathway between two metabolites.  The
+ * This command computes the shortest pathway between a series of metabolites.  The
  * output report will list all the reactions, all of the input metabolites, and
  * all of the connected genes.
  *
  * The positional parameters are the name of the model JSON file, the name of the
  * GTO file for the base genome, the name of the output file (which will be
- * an Excel spreadsheet, and then the BiGG IDs of the required metabolites, in
+ * an Excel spreadsheet), and then the BiGG IDs of the required metabolites, in
  * order.  A pathway will be returned that starts from the first metabolite,
  * passes through all the others, and ends with the last metabolite.
  *
@@ -50,28 +44,24 @@ import org.theseed.utils.ParseFailureException;
  *
  * -h	display command-line usage
  * -v	display more frequent log messages
- * -g	CSV file for triggering gene list
  *
+ * --sbml		name of an SBML file containing additional reactions to import
  * --common		the number of successor reactions that indicates a common compound
  * 				(default 20)
  * --maxLen		maximum size of a useful pathway (default 60)
- * --filter		type of filter to use (default NONE)
  * --include	the ID of a reaction the pathway must include (filter type REACTIONS)
  * --avoid		the ID of a metabolite the pathway must avoid (filter type AVOID)
  *
  * @author Bruce Parrello
  *
  */
-public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
+public class PathwayProcessor extends BaseModelProcessor implements IParms {
 
     // FIELDS
     /** excel workbook for output */
     private CustomWorkbook workbook;
-    /** pathway filter */
-    private PathwayFilter filter;
-    /** metabolic model of interest */
-    private MetaModel targetModel;
-
+    /** pathway filters */
+    private PathwayFilter[] filters;
 
     // COMMAND-LINE OPTIONS
 
@@ -83,10 +73,6 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
     @Option(name = "--maxLen", metaVar = "200", usage = "maximum size of a useful pathway")
     private int maxPathway;
 
-    /** output file for triggering gene list */
-    @Option(name = "--geneCSV", aliases = { "-g" }, usage = "output file for triggering gene CSV" )
-    private File genesOut;
-
     /** list of IDs for reactions to include */
     @Option(name = "--include", aliases = { "-I" }, usage = "ID of a required reaction (multiple allowed)")
     private List<String> includeList;
@@ -94,10 +80,6 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
     /** list of IDs for metabolites to avoid */
     @Option(name = "--avoid", aliases = { "-A" }, usage = "ID of a prohibited metabolite (multiple allowed)")
     private List<String> avoidList;
-
-    /** filter type */
-    @Option(name = "--filter", aliases = { "-f" }, usage = "type of filtering")
-    private PathwayFilter.Type filterType;
 
     /** output excel file */
     @Argument(index = 2, metaVar = "outFile.xlsx", usage = "output excel file", required = true)
@@ -114,13 +96,11 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
     private List<String> otherIdList;
 
     @Override
-    protected void setDbDefaults() {
+    protected void setModelDefaults() {
         this.maxSuccessors = 20;
         this.maxPathway = 60;
-        this.genesOut = null;
         this.includeList = new ArrayList<String>();
         this.avoidList = new ArrayList<String>();
-        this.filterType = PathwayFilter.Type.NONE;
     }
 
     @Override
@@ -132,36 +112,35 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
         if (this.maxPathway < 1)
             throw new ParseFailureException("Pathway limit must be positive");
         MetaModel.setMaxPathway(this.maxPathway);
-        // Verify the genes output file.
-        if (this.genesOut != null && this.genesOut.exists() && ! this.genesOut.canWrite())
-            throw new FileNotFoundException("Cannot write to genes output file " +
-                    this.genesOut + ".");
         // Set up the output workbook.
         this.workbook = CustomWorkbook.create(this.outFile);
     }
 
     @Override
-    protected void runModelDbCommand(MetaModel model, DbConnection db) throws Exception {
+    protected void runCommand() throws Exception {
         // Save the metabolic model.
-        this.targetModel = model;
-        // Create the pathway filter.
-        this.filter = this.filterType.create(this);
+        MetaModel model = this.getModel();
+        // Create the pathway filters.
+        this.filters = this.getFilters();
+        // TODO set up filters
         // Get the pathway from the input to the first output.
         Iterator<String> outputIter = this.otherIdList.iterator();
         String output1 = outputIter.next();
         log.info("Computing pathway from {} to {}.", this.inputId, output1);
-        Pathway path = model.getPathway(this.inputId, output1, this.filter);
+        Pathway path = model.getPathway(this.inputId, output1, this.filters);
         // Now extend the path through the other metabolites.
         while (path != null && outputIter.hasNext()) {
             String output = outputIter.next();
             log.info("Extending pathway to {}.", output);
-            path = model.extendPathway(path, output, filter);
+            path = model.extendPathway(path, output, filters);
         }
         if (path == null)
             throw new ParseFailureException("No path found.");
+        // Next, get the list of branch reactions.
+        var branches = path.getBranches(model);
         // It is time to do the reports.  This will collect the triggering
         // genes.
-        Set<String> genes = new TreeSet<String>();
+        Set<String> goodGenes = new TreeSet<String>();
         // This will collect the input metabolites.
         CountMap<String> inputCounts = new CountMap<String>();
         // Each pathway element transmits an direct-line input to an output.
@@ -180,9 +159,9 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
             this.workbook.storeCell(reaction.getName());
             this.workbook.storeCell(reaction.getReactionRule());
             this.workbook.storeCell(element.getOutput());
-            this.workbook.storeCell(reaction.getFormula());
+            this.workbook.storeCell(reaction.getFormula(element.isReversed()));
             // Add the triggering genes to the gene set.
-            genes.addAll(reaction.getTriggers());
+            goodGenes.addAll(reaction.getTriggers());
             // Get the reaction inputs.
             var inputs = reaction.getOutputs(intermediate);
             for (Reaction.Stoich input : inputs) {
@@ -190,7 +169,7 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
                 if (! input.getMetabolite().equals(oldInput))
                     inputCounts.count(input.getMetabolite(), Math.abs(input.getCoeff()));
             }
-            // Remember our output as the direct-line input next time.
+            // Remember our output as the direct-line input for the next reaction.
             oldInput = intermediate;
         }
         this.workbook.autoSizeColumns();
@@ -205,18 +184,73 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
         this.workbook.autoSizeColumns();
         // Now we are working with genes, so we need the base genome.
         Genome baseGenome = model.getBaseGenome();
-        // Check to see if we need to write the triggering genes to a special file.
-        if (this.genesOut != null)
-            this.writeGenes(genes, db, baseGenome.getId());
+        // The next sheet is the branch reactions.  For each one we we want to show the input metabolite
+        // and the details of the reaction itself.  We also track the triggering genes for the branches.
+        Set<String> badGenes = new TreeSet<String>();
+        this.workbook.addSheet("Branches", true);
+        this.workbook.setHeaders(Arrays.asList("input", "reaction", "reaction_name", "rule",
+                "formula"));
+        for (Map.Entry<String, Set<Reaction>> branchList : branches.entrySet()) {
+            String input = branchList.getKey();
+            for (Reaction reaction : branchList.getValue()) {
+                this.workbook.addRow();
+                this.workbook.storeCell(input);
+                this.workbook.storeCell(reaction.getBiggId());
+                this.workbook.storeCell(reaction.getName());
+                this.workbook.storeCell(reaction.getReactionRule());
+                // We need to see if the input requires reversing the reaction.
+                boolean reverse = reaction.isProduct(input);
+                this.workbook.storeCell(reaction.getFormula(reverse));
+                // Add the triggering genes to the gene set.
+                badGenes.addAll(reaction.getTriggers());
+            }
+        }
+        this.workbook.autoSizeColumns();
         // Write the triggering gene analysis.
         this.workbook.addSheet("Triggers", true);
+        // Finally, we write the triggering genes.  There are good ones that trigger the path, and bad
+        // ones that bleed off metabolites into other reactions.
         var aliasMap = baseGenome.getAliasMap();
-        this.workbook.setHeaders(Arrays.asList("gene", "fid", "aliases", "function"));
+        this.workbook.setHeaders(Arrays.asList("gene", "fid", "aliases", "function", "type"));
+        this.writeGenes(goodGenes, baseGenome, aliasMap, "trigger");
+        this.writeGenes(badGenes, baseGenome, aliasMap, "branch");
+        this.workbook.autoSizeColumns();
+        // Save the workbook.
+        log.info("Saving output to {}.", this.outFile);
+        this.workbook.close();
+    }
+
+    /**
+     * @return the list of filters for this pathway query
+     *
+     * @throws ParseFailureException
+     * @throws IOException
+     */
+    private PathwayFilter[] getFilters() throws IOException, ParseFailureException {
+        // Get all the applicable types.
+        var types = Arrays.stream(PathwayFilter.Type.values()).filter(x -> x.isApplicable(this))
+                .toArray(PathwayFilter.Type[]::new);
+        PathwayFilter[] retVal = new PathwayFilter[types.length];
+        for (int i = 0; i < retVal.length; i++)
+            retVal[i] = types[i].create(this);
+        return retVal;
+    }
+
+    /**
+     * This method will write a set of genes to the triggering worksheet.
+     *
+     * @param genes			set of genes to write
+     * @param baseGenome	base genome for the current model
+     * @param aliasMap		alias map for the base genome
+     * @param type			type of gene-- "trigger" or "branch"
+     */
+    private void writeGenes(Set<String> genes, Genome baseGenome, Map<String, Set<String>> aliasMap, String type) {
         for (String gene : genes) {
             var fids = aliasMap.get(gene);
             if (fids == null) {
                 this.workbook.addRow();
                 this.workbook.storeCell(gene);
+                this.workbook.storeBlankCell();
                 this.workbook.storeBlankCell();
                 this.workbook.storeBlankCell();
                 this.workbook.storeBlankCell();
@@ -230,53 +264,10 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
                     this.workbook.storeCell(fid);
                     this.workbook.storeCell(aliasList);
                     this.workbook.storeCell(feat.getPegFunction());
+                    this.workbook.storeCell(type);
                 }
             }
         }
-        this.workbook.autoSizeColumns();
-        // Save the workbook.
-        log.info("Saving output to {}.", this.outFile);
-        this.workbook.close();
-    }
-
-    /**
-     * This will write the triggering genes to a gene data file for loading into
-     * an Escher map.
-     *
-     * @param genes		set of genes to output
-     * @param db		RNA sequence database for expression levels
-     * @param genomeId	ID of the base genome
-     *
-     * @throws SQLException
-     * @throws IOException
-     */
-    private void writeGenes(Set<String> genes, DbConnection db, String genomeId) throws SQLException, IOException {
-        // Get all the feature data from the RNA database.  We need the genome ID from the
-        // base genome.
-        var baselines = new HashMap<String, Double>(genes.size() * 4 / 3 + 1);
-        try (DbQuery query = new DbQuery(db, "Feature")) {
-            query.select("Feature", "alias", "baseline");
-            query.rel("Feature.genome_id", Relop.EQ);
-            query.setParm(1, genomeId);
-            // Loop through all the features in the genome, keeping the ones we want.
-            var iter = query.iterator();
-            while (iter.hasNext()) {
-                var record = iter.next();
-                String gene = record.getString("Feature.alias");
-                if (gene != null && genes.contains(gene)) {
-                    double level = record.getDouble("Feature.baseline");
-                    baselines.put(gene, level);
-                }
-            }
-        }
-        log.info("{} of {} gene expression levels found in database.",
-                baselines.size(), genes.size());
-        try (PrintWriter genesWriter = new PrintWriter(this.genesOut)) {
-            genesWriter.println("gene,level");
-            for (String gene : genes)
-                genesWriter.format("%s,%4.2f%n", gene, baselines.getOrDefault(gene, 1.0));
-        }
-        log.info("Gene CSV file written to {}.", this.genesOut);
     }
 
     @Override
@@ -291,7 +282,7 @@ public class PathwayProcessor extends BaseModelDbProcessor implements IParms {
 
     @Override
     public MetaModel getModel() {
-        return this.targetModel;
+        return super.getModel();
     }
 
 }

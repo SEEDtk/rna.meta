@@ -56,7 +56,7 @@ class CloseNodeTest {
     private void checkPaths(MetaModel model, Collection<String> reactants, Collection<String> products, int length) {
         for (String reactant : reactants) {
             for (String product : products) {
-                Pathway path1 = model.getPathway(reactant, product, PathwayFilter.NONE);
+                Pathway path1 = model.getPathway(reactant, product);
                 log.info("Path (length {}) from {} to {} is {}.", path1.size(), reactant, product, path1);
                 assertThat(path1.size(), lessThan(length));
             }

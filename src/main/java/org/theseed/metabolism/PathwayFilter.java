@@ -17,10 +17,6 @@ import org.theseed.utils.ParseFailureException;
  */
 public abstract class PathwayFilter {
 
-    // FIELDS
-    /** static no-filtering option */
-    public static final PathwayFilter NONE = new PathwayFilter.None();
-
     /**
      * This interface represents the methods a client must support to build a
      * filter.
@@ -54,6 +50,12 @@ public abstract class PathwayFilter {
             public PathwayFilter create(IParms processor) throws ParseFailureException {
                 return new IncludePathwayFilter(processor);
             }
+
+            @Override
+            public boolean isApplicable(IParms processor) {
+                var includes = processor.getInclude();
+                return (includes != null && ! includes.isEmpty());
+            }
         },
         /** avoid certain compounds in the pathway */
         AVOID {
@@ -61,12 +63,11 @@ public abstract class PathwayFilter {
             public PathwayFilter create(IParms processor) throws ParseFailureException {
                 return new AvoidPathwayFilter(processor);
             }
-        },
-        /** no filtering */
-        NONE {
+
             @Override
-            public PathwayFilter create(IParms processor) throws ParseFailureException {
-                return new PathwayFilter.None();
+            public boolean isApplicable(IParms processor) {
+                var avoids = processor.getAvoid();
+                return (avoids != null && ! avoids.isEmpty());
             }
         };
 
@@ -80,6 +81,13 @@ public abstract class PathwayFilter {
          */
         public abstract PathwayFilter create(IParms processor)
                 throws IOException, ParseFailureException;
+
+        /**
+         * @return TRUE if this filter is requested by the specified command processor, else FALSE
+         *
+         * @param processer		controlling command processor
+         */
+        public abstract boolean isApplicable(IParms processor);
     }
 
     /**
@@ -104,21 +112,4 @@ public abstract class PathwayFilter {
      */
     public abstract boolean isGood(Pathway path);
 
-    /**
-     * This class is a default pathway filter that allows everything.
-     */
-    public static class None extends PathwayFilter {
-
-        @Override
-        public boolean isPossible(Pathway path) {
-            return true;
-        }
-
-        @Override
-        public boolean isGood(Pathway path) {
-            return true;
-        }
-
-
-    }
 }

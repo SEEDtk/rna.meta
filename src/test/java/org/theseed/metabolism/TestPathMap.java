@@ -70,7 +70,7 @@ public class TestPathMap {
         assertThat(score, equalTo(oaa_c_score));
         // Get the branch counts.
         var branchMap = path1.getBranches(model);
-        assertThat(branchMap.size(), lessThanOrEqualTo(middles.size()));
+        assertThat(branchMap.size(), equalTo(4));
         var branches = branchMap.get("mqn8_c");
         assertThat(branches, nullValue());
         var successors = model.getSuccessors("mqn8_c");
@@ -81,6 +81,8 @@ public class TestPathMap {
         this.validateBranches(branches, "akg_c", "icit_c");
         branches = branchMap.get("icit_c");
         this.validateBranches(branches, "icit_c", "glx_c");
+        branches = branchMap.get("glx_c");
+        this.validateBranches(branches, "glx_c", "");
     }
 
     /**

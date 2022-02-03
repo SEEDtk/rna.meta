@@ -85,7 +85,7 @@ public class ReactionsProcessor extends BaseModelReportProcessor implements Reac
             String name = reaction.getName();
             String rFlag = (reaction.isReversible() ? "Y" : "");
             writer.println(id + "\t" + rFlag + "\t" + name + "\t" + reaction.getReactionRule()
-                    + "\t" + reaction.getFormula());
+                    + "\t" + reaction.getFormula(false));
         }
     }
 

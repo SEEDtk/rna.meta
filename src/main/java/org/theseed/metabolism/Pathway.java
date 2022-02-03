@@ -307,6 +307,11 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
                 }
             }
         }
+        // Now, finally, we have the branches for the terminus.
+        String terminus = this.getLast().output;
+        var reactions = model.getSuccessors(terminus);
+        Set<Reaction> branchSet = retVal.computeIfAbsent(terminus, x -> new TreeSet<Reaction>());
+        branchSet.addAll(reactions);
         return retVal;
     }
 
