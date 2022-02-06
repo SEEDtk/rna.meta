@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
@@ -22,20 +23,13 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
-import org.sbml.jsbml.Model;
-import org.sbml.jsbml.ext.fbc.Association;
-import org.sbml.jsbml.ext.fbc.FBCModelPlugin;
-import org.sbml.jsbml.ext.fbc.FBCReactionPlugin;
-import org.sbml.jsbml.ext.fbc.GeneProductRef;
-import org.sbml.jsbml.ext.fbc.LogicalOperator;
-import org.sbml.jsbml.ext.fbc.Or;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.theseed.genome.Genome;
 
 import com.github.cliftonlabs.json_simple.JsonArray;
 import com.github.cliftonlabs.json_simple.JsonException;
+import com.github.cliftonlabs.json_simple.JsonKey;
 import com.github.cliftonlabs.json_simple.JsonObject;
 import com.github.cliftonlabs.json_simple.Jsoner;
 
@@ -53,8 +47,14 @@ public class MetaModel {
     // FIELDS
     /** logging facility */
     protected static Logger log = LoggerFactory.getLogger(MetaModel.class);
-    /** original json object body */
-    private JsonObject modelObject;
+    /** map identifier data */
+    private Map<String, String> mapIdentifiers;
+    /** canvas location */
+    private Coordinate canvasLoc;
+    /** canvas size */
+    private Coordinate canvasSize;
+    /** text labels */
+    private Map<Integer, TextLabel> textLabels;
     /** name of map */
     private String mapName;
     /** genome on which the model is based */
@@ -73,6 +73,8 @@ public class MetaModel {
     private Map<String, Reaction> bReactionMap;
     /** map of node IDs to nodes */
     private Map<Integer, ModelNode> nodeMap;
+    /** duplicate reaction list */
+    private List<Reaction> duplicates;
     /** last ID used */
     private int lastId;
     /** return value when no reactions found */
@@ -87,6 +89,35 @@ public class MetaModel {
     private static Set<String> COMMONS = Set.of("h_c", "h_p", "h2o_c", "atp_c", "co2_c",
             "o2_c", "pi_c", "adp_c", "glu__D_c", "nadh_p", "nadh_c", "nad_c", "nadph_c",
             "o2_p", "na1_p", "na1_c", "h2o2_c", "h2_c");
+
+    /**
+     * This enum is used to manage the JSON keys used by sub-objects of the model.
+     */
+    private enum ModelKeys implements JsonKey {
+        X(0.0), Y(0.0), WIDTH(0.0), HEIGHT(0.0), TEXT("");
+
+        private Object m_value;
+
+        private ModelKeys(Object value) {
+            this.m_value = value;
+        }
+
+        /** This is the string used as a key in the incoming JsonObject map.
+         */
+        @Override
+        public String getKey() {
+            return this.name().toLowerCase();
+        }
+
+        /** This is the default value used when the key is not found.
+         */
+        @Override
+        public Object getValue() {
+            return this.m_value;
+        }
+
+
+    }
 
     /**
      * This class is used to sort a distance map from lowest distance to highest.
@@ -176,6 +207,78 @@ public class MetaModel {
     }
 
     /**
+     * This class represents a text label.  All we need to know is the location and the text itself.
+     */
+    public static class TextLabel {
+
+        /** location for the label */
+        private Coordinate loc;
+        /** text of the label */
+        private String text;
+
+        /**
+         * Construct a text label from a JSON object.
+         *
+         * @param json		JSON object describing the label
+         */
+        public TextLabel(JsonObject json) {
+            this.text = json.getStringOrDefault(ModelKeys.TEXT);
+            this.loc = new Coordinate(json.getDoubleOrDefault(ModelKeys.X),
+                    json.getDoubleOrDefault(ModelKeys.Y));
+        }
+
+        /**
+         * @return the locaction for the label
+         */
+        public Coordinate getLoc() {
+            return this.loc;
+        }
+
+        /**
+         * @return the text of the label
+         */
+        public String getText() {
+            return this.text;
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + ((this.loc == null) ? 0 : this.loc.hashCode());
+            result = prime * result + ((this.text == null) ? 0 : this.text.hashCode());
+            return result;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof TextLabel)) {
+                return false;
+            }
+            TextLabel other = (TextLabel) obj;
+            if (this.loc == null) {
+                if (other.loc != null) {
+                    return false;
+                }
+            } else if (!this.loc.equals(other.loc)) {
+                return false;
+            }
+            if (this.text == null) {
+                if (other.text != null) {
+                    return false;
+                }
+            } else if (!this.text.equals(other.text)) {
+                return false;
+            }
+            return true;
+        }
+
+    }
+
+    /**
      * Construct a metabolic model from a file and a genome.
      *
      * @param inFile	name of the file containing the model JSON
@@ -183,32 +286,68 @@ public class MetaModel {
      * @throws IOException
      */
     public MetaModel(File inFile, Genome genome) throws IOException {
+        // Read in the model file.
+        FileReader reader = new FileReader(inFile);
+        JsonArray modelJson;
+        try {
+            modelJson = (JsonArray) Jsoner.deserialize(reader);
+        } catch (JsonException e) {
+            throw new IOException("JSON error in " + inFile + ":" + e.toString());
+        }
+        setupModel(genome, modelJson);
+    }
+
+    /**
+     * Construct a metabolic model from a JSON representation and a genome.
+     *
+     * @param modelJson		JSON representation of the model
+     * @param genome		genome on which the model was based
+     */
+    public MetaModel(JsonArray modelJson, Genome genome) {
+        setupModel(genome, modelJson);
+    }
+
+    /**
+     * Create a model from an Escher map JSON and a base genome.
+     *
+     * @param genome		base genome for the model
+     * @param modelJson		JSON representation of the model
+     */
+    private void setupModel(Genome genome, JsonArray modelJson) {
         // Save the base genome.
         this.baseGenome = genome;
         // Denote no IDs have been used.
         this.lastId = 0;
-        // Read in the model file.
-        FileReader reader = new FileReader(inFile);
-        try {
-            JsonArray parts = (JsonArray) Jsoner.deserialize(reader);
-            this.modelObject = (JsonObject) parts.get(1);
-            // Get the map name.
-            JsonObject metaObject = (JsonObject) parts.get(0);
-            String name = (String) metaObject.get("map_name");
-            if (name == null)
-                name = "Metabolic map for " + genome.toString();
-            this.mapName = name;
-        } catch (JsonException e) {
-            throw new IOException("JSON error in " + inFile + ":" + e.toString());
+        JsonObject modelObject = (JsonObject) modelJson.get(1);
+        // Get the map name.
+        this.mapIdentifiers = this.readStringMap((JsonObject) modelJson.get(0));
+        String name = this.mapIdentifiers.get("map_name");
+        if (name == null)
+            name = "Metabolic map for " + genome.toString();
+        this.mapName = name;
+        // Get the canvas specs.
+        JsonObject canvasData = (JsonObject) modelObject.get("canvas");
+        this.canvasLoc = new Coordinate(canvasData.getDoubleOrDefault(ModelKeys.X),
+                canvasData.getDoubleOrDefault(ModelKeys.Y));
+        this.canvasSize = new Coordinate(canvasData.getDoubleOrDefault(ModelKeys.WIDTH),
+                canvasData.getDoubleOrDefault(ModelKeys.HEIGHT));
+        // Get the text labels.
+        JsonObject textLabelsO = (JsonObject) modelObject.get("text_labels");
+        this.textLabels = new HashMap<Integer, TextLabel>(textLabelsO.size() * 4 / 3 + 1);
+        for (Map.Entry<String, Object> textEntry : textLabelsO.entrySet()) {
+            Integer key = Integer.valueOf(textEntry.getKey());
+            this.checkId(key);
+            TextLabel label = new TextLabel((JsonObject) textEntry.getValue());
+            this.textLabels.put(key, label);
         }
         // Get the nodes and compute the size of a node-based hash.
-        JsonObject nodes = (JsonObject) this.modelObject.get("nodes");
+        JsonObject nodes = (JsonObject) modelObject.get("nodes");
         final int nodeHashSize = nodes.size() * 4 / 3 + 1;
         // Now we want to build the reaction hashes.  First, we need a map of aliases
         // to FIG IDs.
         var aliasMap = genome.getAliasMap();
         // Now we loop through the reactions, creating the maps.
-        JsonObject reactions = (JsonObject) this.modelObject.get("reactions");
+        JsonObject reactions = (JsonObject) modelObject.get("reactions");
         int nReactions = reactions.size();
         log.info("{} reactions found in map {}.", nReactions, this.mapName);
         final int hashSize = reactions.size() * 4 / 3 + 1;
@@ -216,19 +355,26 @@ public class MetaModel {
         this.successorMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
         this.producerMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
         this.bReactionMap = new HashMap<String, Reaction>(hashSize);
+        this.duplicates = new ArrayList<Reaction>();
         this.orphans = new HashSet<Reaction>();
         for (Map.Entry<String, Object> reactionEntry : reactions.entrySet()) {
             int reactionId = Integer.valueOf(reactionEntry.getKey());
             this.checkId(reactionId);
             JsonObject reactionObject = (JsonObject) reactionEntry.getValue();
             Reaction reaction = new Reaction(reactionId, reactionObject);
-            this.bReactionMap.put(reaction.getBiggId(), reaction);
-            // For each gene alias, connect this reaction to the relevant features.
-            this.connectReaction(aliasMap, reaction);
-            // For each metabolite, add this reaction as a successor or consumer,
-            // as appropriate.
-            this.createReactionNetwork(reaction);
+            String reactionBigg = reaction.getBiggId();
+            if (this.bReactionMap.containsKey(reactionBigg))
+                this.duplicates.add(reaction);
+            else {
+                this.bReactionMap.put(reactionBigg, reaction);
+                // For each gene alias, connect this reaction to the relevant features.
+                this.connectReaction(aliasMap, reaction);
+                // For each metabolite, add this reaction as a successor or consumer,
+                // as appropriate.
+                this.createReactionNetwork(reaction);
+            }
         }
+        log.info("{} duplicate reactions found.", this.duplicates.size());
         // Now set up the nodes.
         this.nodeMap = new HashMap<Integer, ModelNode>(nodeHashSize);
         this.metaboliteMap = new HashMap<String, List<ModelNode.Metabolite>>(nodes.size());
@@ -247,12 +393,40 @@ public class MetaModel {
     }
 
     /**
+     * Convert a JsonObject string map to a real map.
+     *
+     * @param object	JsonObject to convert
+     *
+     * @return the JsonObject mapping as a string-to-string map
+     */
+    private Map<String, String> readStringMap(JsonObject object) {
+        var retVal = new HashMap<String, String>(object.size() * 4 / 3 + 1);
+        for (Map.Entry<String, Object> objEntry : object.entrySet())
+            retVal.put(objEntry.getKey(), (String) objEntry.getValue());
+        return retVal;
+    }
+
+    /**
+     * Convert a string map to a JsonObject.
+     *
+     * @param map	string map to convert
+     *
+     * @return the JsonObject corresponding to the map
+     */
+    private JsonObject writeStringMap(Map<String, String> map) {
+        var retVal = new JsonObject();
+        for (Map.Entry<String, String> mapEntry : map.entrySet())
+            retVal.put(mapEntry.getKey(), mapEntry.getValue());
+        return retVal;
+    }
+
+    /**
      * Connect a reaction to its triggering features.
      *
      * @param aliasMap		alias map for the base genome
      * @param reaction		reaction of interest
      */
-    private void connectReaction(Map<String, Set<String>> aliasMap, Reaction reaction) {
+    protected void connectReaction(Map<String, Set<String>> aliasMap, Reaction reaction) {
         Collection<String> genes = reaction.getGenes();
         boolean found = false;
         for (String gene : genes) {
@@ -277,7 +451,7 @@ public class MetaModel {
      *
      * @param reaction		reaction of interest
      */
-    private void createReactionNetwork(Reaction reaction) {
+    protected void createReactionNetwork(Reaction reaction) {
         for (Reaction.Stoich stoich : reaction.getMetabolites()) {
             String compound = stoich.getMetabolite();
             if (reaction.isReversible() || ! stoich.isProduct()) {
@@ -319,16 +493,9 @@ public class MetaModel {
     /**
      * @return the next available ID number.
      */
-    private int getNextId() {
+    protected int getNextId() {
         this.lastId++;
         return this.lastId;
-    }
-
-    /**
-     * @return the model object
-     */
-    public JsonObject getModelObject() {
-        return this.modelObject;
     }
 
     /**
@@ -375,8 +542,8 @@ public class MetaModel {
      * @return the set of all reactions
      */
     public Set<Reaction> getAllReactions() {
-        Set<Reaction> retVal = this.reactionMap.values().stream().flatMap(x -> x.stream()).collect(Collectors.toSet());
-        retVal.addAll(this.orphans);
+        Set<Reaction> retVal = this.bReactionMap.values().stream().collect(Collectors.toSet());
+        retVal.addAll(this.duplicates);
         return retVal;
     }
 
@@ -727,109 +894,7 @@ public class MetaModel {
      * @param biggId	ID of the desired reaction
      */
     public Reaction getReaction(String biggId) {
-        return this.bReactionMap.get(biggId);
-    }
-
-    /**
-     * Add an SBML model to this map.  Currently, we just add the reactions, and
-     * do not create nodes or segments.  The result is good enough for analysis
-     * of pathways.
-     *
-     * The SBML model must use Argonne naming conventions:  each ID consists of a
-     * prefix ("X_", where "X" indicates the type) plus the BiGG ID.
-     *
-     * @param sbmlModel		SBML model to import
-     */
-    public void importSbml(Model sbmlModel) {
-        int newReactionCount = 0;
-        // We will need the alias map for the base genome.
-        var aliasMap = this.baseGenome.getAliasMap();
-        // Get an FBC-aware version of the model.
-        var fbcModel = (FBCModelPlugin) sbmlModel.getExtension("fbc");
-        // The basic strategy is to import the reactions, adding the metabolites as
-        // needed.
-        final int rN = sbmlModel.getReactionCount();
-        for (int rI = 0; rI < rN; rI++) {
-            var newReaction = sbmlModel.getReaction(rI);
-            // Get the BiGG ID of the reaction.  Only proceed if the reaction is
-            // not already present.
-            String rBiggId = StringUtils.removeStart(newReaction.getId(), "R_");
-            if (! this.bReactionMap.containsKey(rBiggId)) {
-                newReactionCount++;
-                // Get an ID for this reaction.
-                int reactionId = this.getNextId();
-                Reaction reaction = new Reaction(reactionId, rBiggId, newReaction.getName());
-                reaction.setReversible(newReaction.getReversible());
-                // The things we care about are the reaction rule and that stoichiometric
-                // formula.  The reaction rule is first.
-                var products = this.setSbmlReactionRule(reaction, newReaction);
-                this.bReactionMap.put(rBiggId, reaction);
-                // The reaction still needs the gene aliases.  We find these in the
-                // gene product records.
-                for (String product : products) {
-                    var productRef = fbcModel.getGeneProduct(product);
-                    reaction.addAlias(productRef.getName());
-                    reaction.addAlias(productRef.getLabel());
-                }
-                // Finally, connect the reaction to its features.
-                this.connectReaction(aliasMap, reaction);
-                // Build the stoichiometry.
-                newReaction.getListOfProducts().forEach(x -> reaction.addStoich(x, 1));
-                newReaction.getListOfReactants().forEach(x -> reaction.addStoich(x, -1));
-                // Update the networking maps.
-                this.createReactionNetwork(reaction);
-            }
-        }
-        log.info("{} new reactions found.", newReactionCount);
-    }
-
-    /**
-     * Compute the reaction rule for an SBML reaction node
-     *
-     * @param reaction		reaction object to update
-     * @param newReaction	SBML reaction node to parse
-     *
-     * @return the IDs of the gene products used in the rule
-     */
-    private Set<String> setSbmlReactionRule(Reaction reaction, org.sbml.jsbml.Reaction newReaction) {
-        Set<String> retVal = new TreeSet<String>();
-        // Get an FBC-enabled version of the reaction.
-        var trigger = ((FBCReactionPlugin) newReaction.getExtension("fbc"))
-                .getGeneProductAssociation();
-        if (trigger != null) {
-            var rule = trigger.getAssociation();
-            // We will track the aliases in here.
-            String ruleString = this.processRule(rule, retVal);
-            reaction.setRule(ruleString);
-        }
-        return retVal;
-    }
-
-    /**
-     * Recursively parse this rule into a reaction rule string.
-     *
-     * @param rule		rule to parse (as an XML tree)
-     * @param genes		place to save gene products found
-     *
-     * @return a rule expression
-     */
-    private String processRule(Association rule, Set<String> genes) {
-        String retVal;
-        if (rule instanceof GeneProductRef) {
-            // Here we have a leaf.
-            String id = ((GeneProductRef) rule).getGeneProduct();
-            retVal = StringUtils.removeStart(id, "G_");
-            genes.add(id);
-        } else {
-            // Here we have a logical operator.
-            LogicalOperator op = ((LogicalOperator) rule);
-            // Compute the operator type.
-            String operation = (op instanceof Or ? " or " : " and ");
-            // Join the children.
-            retVal = op.getListOfAssociations().stream().map(x -> this.processRule(x, genes))
-                    .collect(Collectors.joining(operation, "(", ")"));
-        }
-        return retVal;
+        return this.getBReactionMap().get(biggId);
     }
 
     /**
@@ -851,6 +916,95 @@ public class MetaModel {
      */
     public Set<String> getInputCompounds() {
         return this.successorMap.keySet();
+    }
+
+    /**
+     * @return the bReactionMap
+     */
+    public Map<String, Reaction> getBReactionMap() {
+        return bReactionMap;
+    }
+
+    /**
+     * @return a JSON representation of this model
+     */
+    public JsonArray toJson() {
+        // An Escher map is (unusually) a list, not a map.
+        JsonArray retVal = new JsonArray();
+        // This will hold the model itself.
+        JsonObject modelObject = new JsonObject();
+        // Convert the string maps to JsonObjects.
+        JsonObject mapIdentifiersO = this.writeStringMap(this.mapIdentifiers);
+        // Build the array.
+        retVal.addChain(mapIdentifiersO).addChain(modelObject);
+        // Store the canvas data.
+        JsonObject canvasData = new JsonObject();
+        canvasData.put("x", this.canvasLoc.getX());
+        canvasData.put("y", this.canvasLoc.getY());
+        canvasData.put("width", this.canvasSize.getX());
+        canvasData.put("height", this.canvasSize.getY());
+        modelObject.put("canvas", canvasData);
+        // Store the text labels.
+        JsonObject textLabelsO = new JsonObject();
+        for (Map.Entry<Integer, TextLabel> textEntry : this.textLabels.entrySet()) {
+            TextLabel textLabel = textEntry.getValue();
+            int key = textEntry.getKey();
+            JsonObject labelO = new JsonObject();
+            labelO.put("x", textLabel.loc.getX());
+            labelO.put("y", textLabel.loc.getY());
+            labelO.put("text", textLabel.text);
+            textLabelsO.put(Integer.toString(key), labelO);
+        }
+        modelObject.put("text_labels", textLabelsO);
+        // Now we output the nodes.
+        JsonObject nodes = new JsonObject();
+        for (ModelNode node : this.nodeMap.values())
+            nodes.put(Integer.toString(node.getId()), node.toJson());
+        modelObject.put("nodes", nodes);
+        // Finally, we output the reactions.
+        JsonObject reactions = new JsonObject();
+        for (Reaction reaction : this.getAllReactions())
+            reactions.put(Integer.toString(reaction.getId()), reaction.toJson());
+        modelObject.put("reactions", reactions);
+        return retVal;
+    }
+
+    /**
+     * @return the map identification information
+     */
+    public Map<String, String> getMapIdentifiers() {
+        return this.mapIdentifiers;
+    }
+
+    /**
+     * @return the canvas location
+     */
+    public Coordinate getCanvasLoc() {
+        return this.canvasLoc;
+    }
+
+    /**
+     * @return the canvas size
+     */
+    public Coordinate getCanvasSize() {
+        return this.canvasSize;
+    }
+
+    /**
+     * @return the text labels
+     */
+    public Map<Integer, TextLabel> getTextLabels() {
+        return this.textLabels;
+    }
+
+    /**
+     * @return the duplicate reaction with the specified ID number, or NULL if none is found
+     *
+     * @param num		ID number of the desired reaction
+     */
+    public Reaction getDuplicate(int num) {
+        Optional<Reaction> retVal = this.duplicates.stream().filter(x -> x.getId() == num).findFirst();
+        return retVal.orElse(null);
     }
 
 }

@@ -20,6 +20,9 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.theseed.genome.Genome;
+import org.theseed.metabolism.MetaModel.TextLabel;
+
+import com.github.cliftonlabs.json_simple.JsonArray;
 
 /**
  * @author Bruce Parrello
@@ -143,6 +146,94 @@ public class MetaModelTest {
         assertThat(painting.get("fum_c"), equalTo(1));
         assertThat(painting.get("acon_C_c"), equalTo(3));
         assertThat(painting.get("accoa_c"), equalTo(2));
+    }
+
+    @Test
+    public void testConversion() throws IOException {
+        File gFile = new File("data", "MG1655-wild.gto");
+        File mFile = new File("data", "ecoli_cc.json");
+        Genome genome = new Genome(gFile);
+        MetaModel model = new MetaModel(mFile, genome);
+        JsonArray modelJson = model.toJson();
+        MetaModel model2 = new MetaModel(modelJson, genome);
+        // Check the identifiers.
+        var mapIds = model.getMapIdentifiers();
+        var mapIds2 = model2.getMapIdentifiers();
+        assertThat(mapIds2.get("map_name"), equalTo(mapIds.get("map_name")));
+        assertThat(mapIds2.get("map_id"), equalTo(mapIds.get("map_id")));
+        assertThat(mapIds2.get("map_description"), equalTo(mapIds.get("map_description")));
+        assertThat(mapIds2.get("homepage"), equalTo(mapIds.get("homepage")));
+        assertThat(mapIds2.get("schema"), equalTo(mapIds.get("schema")));
+        // Check the canvas data.
+        assertThat(model2.getCanvasLoc(), equalTo(model.getCanvasLoc()));
+        assertThat(model2.getCanvasSize(), equalTo(model.getCanvasSize()));
+        // Verify the text labels.
+        var text2 = model2.getTextLabels();
+        var text = model.getTextLabels();
+        assertThat(text2.size(), equalTo(text.size()));
+        for (Map.Entry<Integer, TextLabel> text2Entry : text2.entrySet()) {
+            Integer key = text2Entry.getKey();
+            String keyLabel = "Text key " + Integer.toString(key);
+            var textLabel = text.get(key);
+            assertThat(keyLabel, textLabel, not(nullValue()));
+            assertThat(text2Entry.getValue(), equalTo(textLabel));
+        }
+        // The nodes are accessed from the reactions, so we verify the reactions to get both.
+        var reactions2 = model2.getAllReactions();
+        assertThat(reactions2.size(), equalTo(model.getAllReactions().size()));
+        for (Reaction reaction2 : reactions2) {
+            String reactionId = reaction2.getBiggId();
+            int reaction2Num = reaction2.getId();
+            // A reaction can occur in multiple places in the graph.  Here we handle that.
+            Reaction reaction = model.getReaction(reactionId);
+            if (reaction.getId() != reaction2Num)
+                reaction = model.getDuplicate(reaction2Num);
+            assertThat(reactionId, reaction2.getFormula(false), equalTo(reaction.getFormula(false)));
+            assertThat(reactionId, reaction2.getName(), equalTo(reaction.getName()));
+            assertThat(reactionId, reaction2.getLabelLoc(), equalTo(reaction.getLabelLoc()));
+            assertThat(reactionId, reaction2.getGenes(), equalTo(reaction.getGenes()));
+            assertThat(reactionId, reaction2.getReactionRule(), equalTo(reaction.getReactionRule()));
+            assertThat(reactionId, reaction2.getTriggers(), equalTo(reaction.getTriggers()));
+            assertThat(reactionId, reaction2.isReversible(), equalTo(reaction.isReversible()));
+            var segments2 = reaction2.getSegments();
+            var segments = reaction.getSegments();
+            assertThat(segments2.size(), equalTo(segments.size()));
+            for (int i = 0; i < segments.size(); i++) {
+                String segName = reactionId + " segment " + String.valueOf(i);
+                var segment = segments.get(i);
+                var segment2 = segments2.get(i);
+                assertThat(segName, segment2.getFromNode(), equalTo(segment.getFromNode()));
+                assertThat(segName, segment2.getId(), equalTo(segment.getId()));
+                assertThat(segName, segment2.getToNode(), equalTo(segment.getToNode()));
+                assertThat(segName, segment2.getB1(), equalTo(segment.getB1()));
+                assertThat(segName, segment2.getB2(), equalTo(segment.getB2()));
+                var node = model.getNode(segment.getFromNode());
+                var node2 = model2.getNode(segment2.getFromNode());
+                this.compareNodes(segName + " fromNode", node, node2);
+                node = model.getNode(segment.getToNode());
+                node2 = model2.getNode(segment2.getToNode());
+                this.compareNodes(segName + " toNode", node, node2);
+            }
+        }
+        assertThat(model.getNodeCount(), equalTo(model2.getNodeCount()));
+
+
+    }
+
+    private void compareNodes(String string, ModelNode node, ModelNode node2) {
+        assertThat(string, node2.getId(), equalTo(node.getId()));
+        assertThat(string, node2.getLoc(), equalTo(node.getLoc()));
+        assertThat(string, node2.getClass(), equalTo(node.getClass()));
+        if (node2 instanceof ModelNode.Marker)
+            assertThat(string, ((ModelNode.Marker) node2).getType(), equalTo(((ModelNode.Marker) node).getType()));
+        else {
+            var metaNode2 = (ModelNode.Metabolite) node2;
+            var metaNode = (ModelNode.Metabolite) node;
+            assertThat(string, metaNode2.getBiggId(), equalTo(metaNode.getBiggId()));
+            assertThat(string, metaNode2.getLoc(), equalTo(metaNode.getLoc()));
+            assertThat(string, metaNode2.getName(), equalTo(metaNode.getName()));
+            assertThat(string, metaNode2.isPrimary(), equalTo(metaNode.isPrimary()));
+        }
     }
 
 }

@@ -7,13 +7,14 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
-import org.sbml.jsbml.SpeciesReference;
 
 import com.github.cliftonlabs.json_simple.JsonArray;
 import com.github.cliftonlabs.json_simple.JsonKey;
@@ -41,7 +42,7 @@ public class Reaction implements Comparable<Reaction> {
     /** reversibility flag */
     private boolean reversible;
     /** list of gene aliases */
-    private Set<String> aliases;
+    private Map<String, String> aliases;
     /** metabolite list */
     private List<Stoich> metabolites;
     /** connections list */
@@ -78,7 +79,7 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     private static enum SegmentKeys implements JsonKey {
-        FROM_NODE_ID(0), TO_NODE_ID(0);
+        FROM_NODE_ID(0), TO_NODE_ID(0), B1(null), B2(null), X(0.0), Y(0.0);
 
         private final Object m_value;
 
@@ -171,19 +172,44 @@ public class Reaction implements Comparable<Reaction> {
      */
     public static class Segment {
 
+        /** ID of the segment */
+        private int id;
         /** ID of origin node */
         private int fromNode;
         /** ID of terminal node */
         private int toNode;
+        /** first location */
+        private Coordinate b1;
+        /** second location */
+        private Coordinate b2;
 
         /**
          * Construct a segment from a JSON object.
          *
+         * @param segId			segment ID;
          * @param segObject		source JSON object for the segment
          */
-        public Segment(JsonObject segObject) {
+        public Segment(int segId, JsonObject segObject) {
+            this.id = segId;
             this.fromNode = segObject.getIntegerOrDefault(SegmentKeys.FROM_NODE_ID);
             this.toNode = segObject.getIntegerOrDefault(SegmentKeys.TO_NODE_ID);
+            this.b1 = this.getCoordinates(segObject, SegmentKeys.B1);
+            this.b2 = this.getCoordinates(segObject, SegmentKeys.B2);
+        }
+
+        /**
+         * @return the coordinates specified with the indicated key
+         *
+         * @param segObject		segment JSON object
+         * @param string		segment key to use
+         */
+        private Coordinate getCoordinates(JsonObject segObject, SegmentKeys string) {
+            JsonObject coord = (JsonObject) segObject.getOrDefault(string.getKey(), string.getValue());
+            Coordinate retVal = null;
+            if (coord != null)
+                retVal = new Coordinate(coord.getDoubleOrDefault(SegmentKeys.X),
+                        coord.getDoubleOrDefault(SegmentKeys.Y));
+            return retVal;
         }
 
         /**
@@ -198,6 +224,44 @@ public class Reaction implements Comparable<Reaction> {
          */
         public int getToNode() {
             return this.toNode;
+        }
+
+        /**
+         * @return the ID of this segment
+         */
+        public int getId() {
+            return this.id;
+        }
+
+        /**
+         * @return a JSON object for this segment
+         */
+        public JsonObject toJson() {
+            JsonObject retVal = new JsonObject();
+            retVal.put("from_node_id", this.fromNode);
+            retVal.put("to_node_id", this.toNode);
+            if (this.b1 == null) {
+                retVal.put("b1", null);
+                retVal.put("b2", null);
+            } else {
+                retVal.put("b1", this.b1.toJson());
+                retVal.put("b2", this.b2.toJson());
+            }
+            return retVal;
+        }
+
+        /**
+         * @return the start coordinate
+         */
+        public Coordinate getB1() {
+            return this.b1;
+        }
+
+        /**
+         * @return the end coordinate
+         */
+        public Coordinate getB2() {
+            return this.b2;
         }
 
     }
@@ -218,16 +282,14 @@ public class Reaction implements Comparable<Reaction> {
         this.reactionRule = reactionObject.getStringOrDefault(ReactionKeys.GENE_REACTION_RULE);
         JsonArray geneList = (JsonArray) reactionObject.get("genes");
         // For the gene list, we extract all the aliases and store them as a set.
-        this.aliases = new TreeSet<String>();
+        this.aliases = new TreeMap<String, String>();
         if (geneList != null) {
             for (int i = 0; i < geneList.size(); i++) {
                 JsonObject gene = (JsonObject) geneList.get(i);
                 String bigg_id = (String) gene.get("bigg_id");
                 String name = (String) gene.get("name");
                 if (! StringUtils.isBlank(bigg_id))
-                    this.aliases.add(bigg_id);
-                if (! StringUtils.isBlank(name))
-                    this.aliases.add(name);
+                    this.addAlias(bigg_id, name);
             }
         }
         // For the metabolites list, we convert each one to a stoichiometry.
@@ -254,8 +316,10 @@ public class Reaction implements Comparable<Reaction> {
             this.segments = Collections.emptyList();
         else {
             this.segments = new ArrayList<Segment>();
-            for (Object segItem : segList.values()) {
-                Segment seg = new Segment((JsonObject) segItem);
+            for (Map.Entry<String, Object> segEntry : segList.entrySet()) {
+                int segId = Integer.valueOf(segEntry.getKey());
+                JsonObject segItem = (JsonObject) segEntry.getValue();
+                Segment seg = new Segment(segId, segItem);
                 this.segments.add(seg);
             }
         }
@@ -272,12 +336,24 @@ public class Reaction implements Comparable<Reaction> {
         this.id = reactionId;
         this.biggId = biggId;
         this.name = reactionName;
-        this.aliases = new TreeSet<String>();
+        this.aliases = new TreeMap<String, String>();
         this.labelLoc = null;
         this.metabolites = new ArrayList<Stoich>();
         this.reversible = false;
         this.segments = new ArrayList<Segment>();
         this.reactionRule = "";
+    }
+
+    /**
+     * Add an alias with the specified label (BiGG ID) and the specified name.
+     *
+     * @param label2	BiGG ID
+     * @param name2		name; if NULL, the BiGG ID will be used
+     */
+    public void addAlias(String label2, String name2) {
+        if (StringUtils.isBlank(name2))
+            name2 = label2;
+        this.aliases.put(label2, name2);
     }
 
     /**
@@ -329,7 +405,9 @@ public class Reaction implements Comparable<Reaction> {
      * @return the aliases for the genes that relate to this reaction
      */
     public Set<String> getGenes() {
-        return this.aliases;
+        Set<String> retVal = new TreeSet<String>(this.aliases.keySet());
+        retVal.addAll(this.aliases.values());
+        return retVal;
     }
 
     /**
@@ -344,6 +422,7 @@ public class Reaction implements Comparable<Reaction> {
         }
         return retVal;
     }
+
     /**
      * @return the components of the reaction (reactants and products with stoichometric coefficients)
      */
@@ -458,17 +537,6 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
-     * Store a new gene alias for this reaction.
-     *
-     * @param alias		alias to add to the alias list
-     */
-    protected void addAlias(String alias) {
-        // Skip null and empty aliases. These are sometimes found in the SBML.
-        if (! StringUtils.isBlank(alias))
-            this.aliases.add(alias);
-    }
-
-    /**
      * Specify the reversibility of this reaction.
      *
      * @param reversible2	TRUE if the reaction is to be reversible, else FALSE
@@ -478,15 +546,59 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
-     * Add the stoichiometry from an SBML species reference to this reaction.
+     * Add a new stoichiometric component to this reaction.
      *
-     * @param x			source SBML species reference
-     * @param factor	1 for a product, -1 for a reactant
+     * @param coeff			coefficient
+     * @param metabolite	BiGG ID of the compound
      */
-    protected void addStoich(SpeciesReference x, int factor) {
-        String metabolite = StringUtils.removeStart(x.getSpecies(), "M_");
-        int coeff = ((int) x.getStoichiometry()) * factor;
+    protected void addStoich(int coeff, String metabolite) {
         this.metabolites.add(new Stoich(coeff, metabolite));
+    }
+
+    /**
+     * @return a JSON object for this reaction
+     */
+    public JsonObject toJson() {
+        JsonObject retVal = new JsonObject();
+        retVal.put("name", this.name);
+        retVal.put("bigg_id", this.biggId);
+        retVal.put("reversibility", this.reversible);
+        retVal.put("gene_reaction_rule", this.reactionRule);
+        // Store the label coordinates.
+        retVal.put("label_x", this.labelLoc.getX());
+        retVal.put("label_y", this.labelLoc.getY());
+        // Now we do an array of genes.
+        JsonArray genes = new JsonArray();
+        for (Map.Entry<String, String> geneEntry : this.aliases.entrySet()) {
+            // Check for a missing name.
+            String label = geneEntry.getKey();
+            String name = geneEntry.getValue();
+            JsonObject pair = new JsonObject();
+            pair.put("bigg_id", label);
+            if (! label.contentEquals(name))
+                pair.put("name", name);
+            genes.add(pair);
+        }
+        retVal.put("genes", genes);
+        // Next, the reaction stoichiometry.
+        JsonArray metabolites = new JsonArray();
+        for (Stoich stoich : this.metabolites) {
+            JsonObject stoichO = new JsonObject();
+            stoichO.put("coefficient", stoich.coefficient);
+            stoichO.put("bigg_id", stoich.biggId);
+            metabolites.add(stoichO);
+        }
+        retVal.put("metabolites", metabolites);
+        // Finally, the segments.
+        JsonObject segments = new JsonObject();
+        for (Segment segment : this.segments) {
+            int segId = segment.getId();
+            JsonObject segObject = segment.toJson();
+            segments.put(Integer.toString(segId), segObject);
+        }
+        retVal.put("segments", segments);
+        // Return the reaction.
+        return retVal;
     }
 
 }

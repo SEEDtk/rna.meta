@@ -7,12 +7,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 
-import javax.xml.stream.XMLStreamException;
-
 import org.kohsuke.args4j.Argument;
-import org.kohsuke.args4j.Option;
-import org.sbml.jsbml.Model;
-import org.sbml.jsbml.SBMLReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.theseed.erdb.utils.BaseDbProcessor;
@@ -32,7 +27,6 @@ import org.theseed.utils.ParseFailureException;
  * -h	display command-line usage
  * -v	display more frequent log messages
  *
- * --sbml		name of an SBML file containing additional reactions to import
  * --type		type of database (default SQLITE)
  * --dbfile		database file name (SQLITE only)
  * --url		URL of database (host and name)
@@ -50,10 +44,6 @@ public abstract class BaseModelDbProcessor extends BaseDbProcessor {
     private MetaModel model0;
 
     // COMMAND-LINE OPTIONS
-
-    /** optional SBML import file */
-    @Option(name = "--sbml", metaVar = "sbml.xml", usage = "sbml model containing additional reactions")
-    private File sbmlFile;
 
     /** model JSON file */
     @Argument(index = 0, metaVar = "model.json", usage = "JSON file for metabolic model",
@@ -78,15 +68,6 @@ public abstract class BaseModelDbProcessor extends BaseDbProcessor {
         this.model0 = new MetaModel(this.modelFile, baseGenome);
         log.info("Model loaded from {}.  {} genome features have associated reactions.",
                 this.modelFile, this.model0.featuresCovered());
-        if (this.sbmlFile != null) {
-            log.info("Loading additional reactions from {}.", this.sbmlFile);
-            try {
-                Model xmlModel = SBMLReader.read(this.sbmlFile).getModel();
-                this.model0.importSbml(xmlModel);
-            } catch (XMLStreamException e) {
-                throw new IOException("XML Error: " + e.toString());
-            }
-        }
         this.validateModelParms();
         return true;
     }

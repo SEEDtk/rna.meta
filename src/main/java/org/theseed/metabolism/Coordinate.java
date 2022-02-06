@@ -3,6 +3,8 @@
  */
 package org.theseed.metabolism;
 
+import com.github.cliftonlabs.json_simple.JsonObject;
+
 /**
  * This is a very simple class that represents a physical location on a metabolic map.
  * It is sorted by the y-coordinate and then the x-coordinate, so that coordinates
@@ -102,6 +104,16 @@ public class Coordinate implements Comparable<Coordinate> {
             return false;
         }
         return true;
+    }
+
+    /**
+     * @return a JSON object for this coordinate
+     */
+    public JsonObject toJson() {
+        JsonObject retVal = new JsonObject();
+        retVal.put("x", this.x);
+        retVal.put("y", this.y);
+        return retVal;
     }
 
 

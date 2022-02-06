@@ -10,7 +10,6 @@ import com.github.cliftonlabs.json_simple.JsonObject;
  * This object represents a node in a metabolic model.  The node generally represents a particular
  * metabolite, though some nodes are markers.
  *
- *
  * @author Bruce Parrello
  *
  */
@@ -24,7 +23,8 @@ public abstract class ModelNode implements Comparable<ModelNode> {
 
     public static enum NodeKeys implements JsonKey {
         NODE_TYPE("marker"), X(0), Y(0), BIGG_ID(""),
-        NAME("<unknown>"), NODE_IS_PRIMARY(false);
+        NAME("<unknown>"), NODE_IS_PRIMARY(false),
+        LABEL_X(0), LABEL_Y(0);
 
         private final Object m_value;
 
@@ -87,6 +87,8 @@ public abstract class ModelNode implements Comparable<ModelNode> {
         private String name;
         /** TRUE if this is the primary node */
         private boolean primaryFlag;
+        /** label coordinates */
+        private Coordinate labelLoc;
 
         /**
          * Construct a metabolite node from the json descriptor.
@@ -99,6 +101,8 @@ public abstract class ModelNode implements Comparable<ModelNode> {
             this.bigg_id = jsonObject.getStringOrDefault(NodeKeys.BIGG_ID);
             this.name = jsonObject.getStringOrDefault(NodeKeys.NAME);
             this.primaryFlag = jsonObject.getBooleanOrDefault(NodeKeys.NODE_IS_PRIMARY);
+            this.labelLoc = new Coordinate(jsonObject.getDoubleOrDefault(NodeKeys.LABEL_X),
+                    jsonObject.getDoubleOrDefault(NodeKeys.LABEL_Y));
         }
 
         /**
@@ -122,7 +126,15 @@ public abstract class ModelNode implements Comparable<ModelNode> {
             return this.primaryFlag;
         }
 
-
+        @Override
+        protected void toNodeJson(JsonObject nodeJson) {
+            nodeJson.put("label_x", this.labelLoc.getX());
+            nodeJson.put("label_y", this.labelLoc.getY());
+            nodeJson.put("bigg_id", this.bigg_id);
+            nodeJson.put("name", this.name);
+            nodeJson.put("node_is_primary", this.primaryFlag);
+            nodeJson.put("node_type", "metabolite");
+        }
 
     }
 
@@ -153,12 +165,35 @@ public abstract class ModelNode implements Comparable<ModelNode> {
             return this.type;
         }
 
+        @Override
+        protected void toNodeJson(JsonObject nodeJson) {
+            nodeJson.put("node_type", this.type);
+        }
+
     }
 
     @Override
     public int compareTo(ModelNode o) {
         return this.id - o.id;
     }
+
+    /**
+     * @return the JSON object for this node
+     */
+    public JsonObject toJson() {
+        JsonObject retVal = new JsonObject();
+        retVal.put("x", this.loc.getX());
+        retVal.put("y", this.loc.getY());
+        this.toNodeJson(retVal);
+        return retVal;
+    }
+
+    /**
+     * Fill ths subclass data in the JSON object for this node.
+     *
+     * @param nodeJson	JSON object for this node
+     */
+    protected abstract void toNodeJson(JsonObject nodJson);
 
     @Override
     public int hashCode() {
