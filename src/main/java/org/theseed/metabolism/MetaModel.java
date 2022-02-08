@@ -6,6 +6,7 @@ package org.theseed.metabolism;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -352,8 +353,6 @@ public class MetaModel {
         log.info("{} reactions found in map {}.", nReactions, this.mapName);
         final int hashSize = reactions.size() * 4 / 3 + 1;
         this.reactionMap = new HashMap<String, Set<Reaction>>(hashSize);
-        this.successorMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
-        this.producerMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
         this.bReactionMap = new HashMap<String, Reaction>(hashSize);
         this.duplicates = new ArrayList<Reaction>();
         this.orphans = new HashSet<Reaction>();
@@ -369,12 +368,13 @@ public class MetaModel {
                 this.bReactionMap.put(reactionBigg, reaction);
                 // For each gene alias, connect this reaction to the relevant features.
                 this.connectReaction(aliasMap, reaction);
-                // For each metabolite, add this reaction as a successor or consumer,
-                // as appropriate.
-                this.createReactionNetwork(reaction);
             }
         }
         log.info("{} duplicate reactions found.", this.duplicates.size());
+        // Denote we have no reaction network maps.  We don't build them here, because the client
+        // might have active-direction stuff to set up.
+        this.successorMap = null;
+        this.producerMap = null;
         // Now set up the nodes.
         this.nodeMap = new HashMap<Integer, ModelNode>(nodeHashSize);
         this.metaboliteMap = new HashMap<String, List<ModelNode.Metabolite>>(nodes.size());
@@ -454,17 +454,30 @@ public class MetaModel {
     protected void createReactionNetwork(Reaction reaction) {
         for (Reaction.Stoich stoich : reaction.getMetabolites()) {
             String compound = stoich.getMetabolite();
-            if (reaction.isReversible() || ! stoich.isProduct()) {
+            if (reaction.isInput(stoich)) {
                 Set<Reaction> successors = this.successorMap.computeIfAbsent(compound,
                         x -> new TreeSet<Reaction>());
                 successors.add(reaction);
             }
-            if (reaction.isReversible() || stoich.isProduct()) {
+            if (reaction.isOutput(stoich)) {
                 Set<Reaction> producers = this.producerMap.computeIfAbsent(compound,
                         x -> new TreeSet<Reaction>());
                 producers.add(reaction);
             }
         }
+    }
+
+    /**
+     * Build (or rebuild) the reaction network (successor and producer maps) to reflect the
+     * current active-direction states of the reactions.  Note that the duplicate reactions are not
+     * included in the rebuild.  These are display-only and not part of the reaction network.
+     */
+    public void buildReactionNetwork() {
+        int nodeHashSize = this.getMetaboliteCount() * 4 / 3 + 1;
+        this.successorMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
+        this.producerMap = new HashMap<String, Set<Reaction>>(nodeHashSize);
+        for (Reaction reaction : this.bReactionMap.values())
+            this.createReactionNetwork(reaction);
     }
 
     /**
@@ -621,6 +634,7 @@ public class MetaModel {
      * @return a map from metabolite IDs to reaction counts
      */
     public Map<String, Integer> paintProducers(String target, Set<String> commons) {
+        this.verifyReactionNetwork();
         Map<String, Integer> retVal = calculateConnections(target, commons, this.producerMap);
         return retVal;
     }
@@ -635,6 +649,7 @@ public class MetaModel {
      * @return a map from metabolite IDs to reaction counts
      */
     public Map<String, Integer> paintConsumers(String target, Set<String> commons) {
+        this.verifyReactionNetwork();
         Map<String, Integer> retVal = calculateConnections(target, commons, this.successorMap);
         return retVal;
     }
@@ -688,11 +703,20 @@ public class MetaModel {
      */
     public Set<String> getCommons() {
         Set<String> retVal = new HashSet<String>(COMMONS);
+        this.verifyReactionNetwork();
         for (Map.Entry<String, Set<Reaction>> succession : this.successorMap.entrySet()) {
             if (succession.getValue().size() > MAX_SUCCESSORS)
                 retVal.add(succession.getKey());
         }
         return retVal;
+    }
+
+    /**
+     * Insure we have a reaction network built.
+     */
+    private void verifyReactionNetwork() {
+        if (this.successorMap == null)
+            this.buildReactionNetwork();
     }
 
     /**
@@ -772,6 +796,7 @@ public class MetaModel {
      * 		   was found
      */
     private Pathway findPathway(Collection<Pathway> initial, PathwayFilter... filters) {
+        this.verifyReactionNetwork();
         // Compute the common compounds.
         Set<String> commons = this.getCommons();
         // Set up all the goal compounds.
@@ -855,6 +880,7 @@ public class MetaModel {
      * @return the set of successor reactions (which may be empty)
      */
     public Set<Reaction> getSuccessors(String product) {
+        this.verifyReactionNetwork();
         return this.successorMap.getOrDefault(product, NO_REACTIONS);
     }
 
@@ -866,6 +892,7 @@ public class MetaModel {
      * @return the set of producing reactions (which may be empty)
      */
     public Set<Reaction> getProducers(String product) {
+        this.verifyReactionNetwork();
         return this.producerMap.getOrDefault(product, NO_REACTIONS);
     }
 
@@ -908,6 +935,7 @@ public class MetaModel {
      * @return the estimated number of paths
      */
     public int getProductCount() {
+        this.verifyReactionNetwork();
         return this.producerMap.size();
     }
 
@@ -915,6 +943,7 @@ public class MetaModel {
      * @return the set of compounds that have successor reactions
      */
     public Set<String> getInputCompounds() {
+        this.verifyReactionNetwork();
         return this.successorMap.keySet();
     }
 
@@ -967,6 +996,21 @@ public class MetaModel {
             reactions.put(Integer.toString(reaction.getId()), reaction.toJson());
         modelObject.put("reactions", reactions);
         return retVal;
+    }
+
+    /**
+     * Save this model to a file in JSON format.
+     *
+     * @param file		output file
+     */
+    public void save(File file) throws IOException {
+        JsonArray json = this.toJson();
+        try (PrintWriter writer = new PrintWriter(file)) {
+            log.info("Writing metabolic map {} to {}.", this.mapName, file);
+            var readable = Jsoner.serialize(json);
+            String pretty = Jsoner.prettyPrint(readable);
+            writer.print(pretty);
+        }
     }
 
     /**

@@ -54,6 +54,25 @@ public class PathwayQueryTest {
         validatePath(path3, "icit_c", "icit_c");
         checkInclude(path3, "mal__L_c");
         checkAvoid(path3, "glx_c");
+        // Now test the active-direction stuff.  We need a reaction to manipulate.
+        Reaction acontA = model.getReaction("ACONTa");
+        path1 = model.getPathway("icit_c", "cit_c");
+        validatePath(path1, "icit_c", "cit_c");
+        assertThat(path1.size(), equalTo(2));
+        // Turn off the reverse.  The path will have to loop around.
+        acontA.setActive(Reaction.ActiveDirections.FORWARD);
+        model.buildReactionNetwork();
+        path1 = model.getPathway("icit_c", "cit_c");
+        validatePath(path1, "icit_c", "cit_c");
+        assertThat(path1.contains(acontA), isFalse());
+        path1 = model.getPathway("cit_c", "icit_c");
+        validatePath(path1, "cit_c", "icit_c");
+        assertThat(path1.size(), equalTo(2));
+        acontA.setActive(Reaction.ActiveDirections.REVERSE);
+        model.buildReactionNetwork();
+        path1 = model.getPathway("cit_c", "icit_c");
+        validatePath(path1, "cit_c", "icit_c");
+        assertThat(path1.contains(acontA), isFalse());
     }
 
     /**

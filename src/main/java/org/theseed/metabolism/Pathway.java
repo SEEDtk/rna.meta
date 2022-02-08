@@ -3,6 +3,11 @@
  */
 package org.theseed.metabolism;
 
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -14,6 +19,15 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import org.apache.commons.lang3.StringUtils;
+import org.theseed.utils.ParseFailureException;
+
+import com.github.cliftonlabs.json_simple.JsonArray;
+import com.github.cliftonlabs.json_simple.JsonException;
+import com.github.cliftonlabs.json_simple.JsonKey;
+import com.github.cliftonlabs.json_simple.JsonObject;
+import com.github.cliftonlabs.json_simple.Jsoner;
 
 /**
  * A pathway is an ordered set of reactions from one gene to another.  The rule is
@@ -31,6 +45,34 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
     private List<Element> elements;
     /** pathway goal compound */
     private String goal;
+
+    /**
+     * This enum defines the JSON keys we use.
+     */
+    private static enum PathwayKeys implements JsonKey {
+        REVERSED(false), OUTPUT("");
+
+        private final Object m_value;
+
+        private PathwayKeys(final Object value) {
+            this.m_value = value;
+        }
+
+        /** This is the string used as a key in the incoming JsonObject map.
+         */
+        @Override
+        public String getKey() {
+            return this.name().toLowerCase();
+        }
+
+        /** This is the default value used when the key is not found.
+         */
+        @Override
+        public Object getValue() {
+            return this.m_value;
+        }
+
+    }
 
     /**
      * This represents a single reaction element of the pathway.  Elements are sorted by reaction ID, then
@@ -55,6 +97,25 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
             this.reaction = reaction;
             this.output = node.getMetabolite();
             this.reversed = ! node.isProduct();
+        }
+
+        /**
+         * Create a pathway element from a JSON representation.
+         *
+         * @param json		JSON representation of the element
+         * @param model		parent model to contain the pathway
+         *
+         * @throws ParseFailureException
+         */
+        public Element(JsonObject json, MetaModel model) throws ParseFailureException {
+            JsonObject reactionO = (JsonObject) json.get("reaction");
+            String reactionId = reactionO.getStringOrDefault(Reaction.ReactionKeys.BIGG_ID);
+            this.reaction = model.getReaction(reactionId);
+            if (this.reaction == null)
+                throw new ParseFailureException("Pathway reaction " + reactionId
+                        + " is not in model " + model.getMapName() + ".");
+            this.output = json.getStringOrDefault(PathwayKeys.OUTPUT);
+            this.reversed = json.getBooleanOrDefault(PathwayKeys.REVERSED);
         }
 
         /**
@@ -120,6 +181,56 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
             return retVal;
         }
 
+        /**
+         * @return a JSON representation of this pathway element
+         */
+        public JsonObject toJson() {
+            JsonObject retVal = new JsonObject();
+            retVal.put("reversed", this.reversed);
+            retVal.put("output", this.output);
+            retVal.put("reaction", this.reaction.toJson());
+            return retVal;
+        }
+
+        @Override
+        public int hashCode() {
+            final int prime = 31;
+            int result = 1;
+            result = prime * result + ((this.output == null) ? 0 : this.output.hashCode());
+            result = prime * result + ((this.reaction == null) ? 0 : this.reaction.hashCode());
+            result = prime * result + (this.reversed ? 1231 : 1237);
+            return result;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof Element)) {
+                return false;
+            }
+            Element other = (Element) obj;
+            if (this.output == null) {
+                if (other.output != null) {
+                    return false;
+                }
+            } else if (!this.output.equals(other.output)) {
+                return false;
+            }
+            if (this.reaction == null) {
+                if (other.reaction != null) {
+                    return false;
+                }
+            } else if (!this.reaction.equals(other.reaction)) {
+                return false;
+            }
+            if (this.reversed != other.reversed) {
+                return false;
+            }
+            return true;
+        }
+
     }
 
     /**
@@ -141,6 +252,51 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
     }
 
     /**
+     * Construct a pathway from a JSON representation.
+     *
+     * @param json		JSON representation of the pathway
+     * @param model		parent model of the pathway
+     *
+     * @throws ParseFailureException
+     */
+    public Pathway(JsonArray json, MetaModel model) throws ParseFailureException {
+        this.fromJson(json, model);
+    }
+
+    /**
+     * Construct a pathway from a json string.
+     *
+     * @param jsonString	JSON string describing the pathway
+     * @param model			parent model of the pathway
+     *
+     * @throws ParseFailureException
+     */
+    public Pathway(String jsonString, MetaModel model) throws ParseFailureException {
+        JsonArray json = Jsoner.deserialize(jsonString, (JsonArray) null);
+        if (json == null)
+            throw new ParseFailureException("Cannot deserialize JSON string \"" + StringUtils.abbreviate(jsonString, 30)
+                    + "\".");
+        this.fromJson(json, model);
+    }
+
+    /**
+     * Construct a pathway from a json file.
+     *
+     * @param inFile	file containing the JSON representation of the pathway
+     * @param model		parent model of the pathway
+     *
+     * @throws ParseFailureException
+     * @throws JsonException
+     * @throws IOException
+     */
+    public Pathway(File inFile, MetaModel model) throws ParseFailureException, JsonException, IOException {
+        try (Reader reader = new FileReader(inFile)) {
+            JsonArray json = (JsonArray) Jsoner.deserialize(reader);
+            this.fromJson(json, model);
+        }
+    }
+
+    /**
      * Construct a pathway from a single reaction element and specify a goal
      *
      * @param reaction	first reaction in pathway
@@ -151,6 +307,23 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
         this.elements = new ArrayList<Element>();
         add(reaction, node);
         this.goal = goal;
+    }
+
+    /**
+     * Initialize this pathway from a JSON representation.
+     *
+     * @param json		JSON representation of the pathway
+     * @param model		parent model of the pathway
+     *
+     * @throws ParseFailureException
+     */
+    private void fromJson(JsonArray json, MetaModel model) throws ParseFailureException {
+        this.elements = new ArrayList<Element>(json.size());
+        for (Object obj : json) {
+            JsonObject elementO = (JsonObject) obj;
+            Element element = new Element(elementO, model);
+            this.elements.add(element);
+        }
     }
 
     /**
@@ -371,6 +544,37 @@ public class Pathway implements Iterable<Pathway.Element>, Comparable<Pathway> {
                 retVal = this.elements.get(i).compareTo(o.elements.get(i));
         }
         return retVal;
+    }
+
+    /**
+     * @return a JSON representation of this pathway
+     */
+    public JsonArray toJson() {
+        JsonArray retVal = new JsonArray();
+        for (Element element : this)
+            retVal.add(element.toJson());
+        return retVal;
+    }
+
+    /**
+     * @return a string representation of this pathway
+     */
+    public String toJsonString() {
+        return Jsoner.serialize(this.toJson());
+    }
+
+    /**
+     * Save this pathway to a file.
+     *
+     * @param outFile	output file for saving the pathway
+     *
+     * @throws IOException
+     */
+    public void save(File outFile) throws IOException {
+        String jsonString = this.toJsonString();
+        try (PrintWriter writer = new PrintWriter(outFile)) {
+            writer.println(Jsoner.prettyPrint(jsonString));
+        }
     }
 
 }

@@ -51,6 +51,7 @@ import org.theseed.utils.ParseFailureException;
  * --maxLen		maximum size of a useful pathway (default 60)
  * --include	the ID of a reaction the pathway must include (filter type REACTIONS)
  * --avoid		the ID of a metabolite the pathway must avoid (filter type AVOID)
+ * --loop		loop the path back to the original compound
  *
  * @author Bruce Parrello
  *
@@ -81,6 +82,10 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     @Option(name = "--avoid", aliases = { "-A" }, usage = "ID of a prohibited metabolite (multiple allowed)")
     private List<String> avoidList;
 
+    /** TRUE if the path should be looped */
+    @Option(name = "--loop", usage = "if specified, the path will be looped back to the first compound")
+    private boolean loopFlag;
+
     /** output excel file */
     @Argument(index = 2, metaVar = "outFile.xlsx", usage = "output excel file", required = true)
     private File outFile;
@@ -101,6 +106,7 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         this.maxPathway = 60;
         this.includeList = new ArrayList<String>();
         this.avoidList = new ArrayList<String>();
+        this.loopFlag = false;
     }
 
     @Override
@@ -122,7 +128,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         MetaModel model = this.getModel();
         // Create the pathway filters.
         this.filters = this.getFilters();
-        // TODO set up filters
         // Get the pathway from the input to the first output.
         Iterator<String> outputIter = this.otherIdList.iterator();
         String output1 = outputIter.next();
@@ -136,6 +141,10 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         }
         if (path == null)
             throw new ParseFailureException("No path found.");
+        if (this.loopFlag) {
+            log.info("Looping pathway back to {}.", this.inputId);
+            path = model.loopPathway(path, this.inputId, this.filters);
+        }
         // Next, get the list of branch reactions.
         var branches = path.getBranches(model);
         // It is time to do the reports.  This will collect the triggering

@@ -25,6 +25,10 @@ import com.github.cliftonlabs.json_simple.JsonObject;
  * segments that describe the nodes to which it connects, the list of genes that trigger it,
  * various bits of identifiying information, and the stoichiometry of the compounds involved.
  *
+ * The reaction also contains an active-directions status.  Depending on the state of the cell,
+ * a reaction may be suppressed completely, or have one or both directions of flow shut down.
+ * The active-directions status is reflected in the "isInput" and "isOutput" methods.
+ *
  * @author Bruce Parrello
  *
  */
@@ -49,10 +53,91 @@ public class Reaction implements Comparable<Reaction> {
     private List<Segment> segments;
     /** display location of reaction label */
     private Coordinate labelLoc;
+    /** active direction indicator */
+    private ActiveDirections active;
     /** connectors for reaction rules */
     private static final Set<String> CONNECTORS = Set.of("and", "or", "not");
 
-    private static enum ReactionKeys implements JsonKey {
+    /**
+     * This enumeration determines the active directions of a reaction.
+     */
+    public static enum ActiveDirections {
+        BOTH {
+
+            @Override
+            public boolean isInput(Stoich stoich) {
+                return true;
+            }
+
+            @Override
+            public boolean isOutput(Stoich stoich) {
+                return true;
+            }
+
+        }, FORWARD {
+
+            @Override
+            public boolean isInput(Stoich stoich) {
+                return ! stoich.isProduct();
+            }
+
+            @Override
+            public boolean isOutput(Stoich stoich) {
+                return stoich.isProduct();
+            }
+
+        }, REVERSE {
+
+            @Override
+            public boolean isInput(Stoich stoich) {
+                return stoich.isProduct();
+            }
+
+            @Override
+            public boolean isOutput(Stoich stoich) {
+                return ! stoich.isProduct();
+            }
+
+        }, NEITHER {
+
+            @Override
+            public boolean isInput(Stoich stoich) {
+                return false;
+            }
+
+            @Override
+            public boolean isOutput(Stoich stoich) {
+                return false;
+            }
+
+        };
+
+        /**
+         * @return TRUE if the specified stoichiometric element is an eligible input in this active direction
+         *
+         * @param stoich	stoichiometric element of interest
+         */
+        public abstract boolean isInput(Stoich stoich);
+
+        /**
+         * @return TRUE if the specified stoichiometric element is an eligible output in this active direction
+         *
+         * @param stoich	stoichiometric element of interest
+         */
+        public abstract boolean isOutput(Stoich stoich);
+
+        /**
+         * Store the default active-direction indicator for a reaction.
+         *
+         * @param react		reaction to set up
+         */
+        protected static void setDefault(Reaction react) {
+            react.active = (react.isReversible() ? BOTH : FORWARD);
+        }
+
+    }
+
+    protected static enum ReactionKeys implements JsonKey {
         NAME("<unknown>"), BIGG_ID(""), REVERSIBILITY(false), LABEL_X(0.0), LABEL_Y(0.0),
         GENE_REACTION_RULE(""), COEFFICIENT(1);
 
@@ -280,8 +365,9 @@ public class Reaction implements Comparable<Reaction> {
         this.labelLoc = new Coordinate(reactionObject.getDoubleOrDefault(ReactionKeys.LABEL_X),
                 reactionObject.getDoubleOrDefault(ReactionKeys.LABEL_Y));
         this.reactionRule = reactionObject.getStringOrDefault(ReactionKeys.GENE_REACTION_RULE);
+        ActiveDirections.setDefault(this);
+        // For the gene list, we extract all the aliases and store them in a map.
         JsonArray geneList = (JsonArray) reactionObject.get("genes");
-        // For the gene list, we extract all the aliases and store them as a set.
         this.aliases = new TreeMap<String, String>();
         if (geneList != null) {
             for (int i = 0; i < geneList.size(); i++) {
@@ -392,6 +478,10 @@ public class Reaction implements Comparable<Reaction> {
     }
 
     /**
+     * Determine whether or not a compound is a product.  This only checks its position in the normal
+     * form of the reaction.  To determine whether or not the compound is a potential input or output,
+     * use "isInput" and "isOutput".
+     *
      * @return TRUE if the specified metabolite is a product of this reaction
      *
      * @param compound	metabolite to check
@@ -399,6 +489,24 @@ public class Reaction implements Comparable<Reaction> {
     public boolean isProduct(String compound) {
         boolean retVal = this.metabolites.stream().anyMatch(x -> x.isProduct() && x.getMetabolite().contentEquals(compound));
         return retVal;
+    }
+
+    /**
+     * @return TRUE if the specified stoichiometric element is a possible output of this reaction
+     *
+     * @param stoich	stoichiometric element of interest
+     */
+    public boolean isOutput(Stoich stoich) {
+        return this.active.isOutput(stoich);
+    }
+
+    /**
+     * @return TRUE if the specified stoichiometric element is a possible input of this reaction
+     *
+     * @param stoich	stoichiometric element of interest
+     */
+    public boolean isInput(Stoich stoich) {
+        return this.active.isInput(stoich);
     }
 
     /**
@@ -565,8 +673,10 @@ public class Reaction implements Comparable<Reaction> {
         retVal.put("reversibility", this.reversible);
         retVal.put("gene_reaction_rule", this.reactionRule);
         // Store the label coordinates.
-        retVal.put("label_x", this.labelLoc.getX());
-        retVal.put("label_y", this.labelLoc.getY());
+        if (this.labelLoc != null) {
+            retVal.put("label_x", this.labelLoc.getX());
+            retVal.put("label_y", this.labelLoc.getY());
+        }
         // Now we do an array of genes.
         JsonArray genes = new JsonArray();
         for (Map.Entry<String, String> geneEntry : this.aliases.entrySet()) {
@@ -599,6 +709,22 @@ public class Reaction implements Comparable<Reaction> {
         retVal.put("segments", segments);
         // Return the reaction.
         return retVal;
+    }
+
+    /**
+     * @return the active-directions status
+     */
+    public ActiveDirections getActive() {
+        return this.active;
+    }
+
+    /**
+     * Specify a new active-directions status.
+     *
+     * @param active 	the active-directions status to set
+     */
+    public void setActive(ActiveDirections active) {
+        this.active = active;
     }
 
 }

@@ -154,8 +154,24 @@ public class MetaModelTest {
         File mFile = new File("data", "ecoli_cc.json");
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
+        // Test JSON conversion.
         JsonArray modelJson = model.toJson();
         MetaModel model2 = new MetaModel(modelJson, genome);
+        this.verifyModels(model, model2);
+        // Test save and load.
+        File saveFile = new File("data", "json.ser");
+        model.save(saveFile);
+        model2 = new MetaModel(saveFile, genome);
+        this.verifyModels(model, model2);
+    }
+
+    /**
+     * Insure two models are the same.
+     *
+     * @param model		original model
+     * @param model2	copied model
+     */
+    protected void verifyModels(MetaModel model, MetaModel model2) {
         // Check the identifiers.
         var mapIds = model.getMapIdentifiers();
         var mapIds2 = model2.getMapIdentifiers();
@@ -216,8 +232,6 @@ public class MetaModelTest {
             }
         }
         assertThat(model.getNodeCount(), equalTo(model2.getNodeCount()));
-
-
     }
 
     private void compareNodes(String string, ModelNode node, ModelNode node2) {
