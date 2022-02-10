@@ -178,8 +178,10 @@ public class ModifierList {
         else {
             // This will count the number of modifications made.
             int modCount = 0;
+            int rCount = 0;
             // Loop through the reactions.
             for (Reaction reaction : model.getAllReactions()) {
+                rCount++;
                 // Remember the active direction.  We want to know if it changes.
                 Reaction.ActiveDirections oldActive = reaction.getActive();
                 // Apply each flow modifier to this reaction.
@@ -187,7 +189,7 @@ public class ModifierList {
                 if (reaction.getActive() != oldActive)
                     modCount++;
             }
-            log.info("{} reactions affected by {} flow modifiers.", modCount, this.modifiers.size());
+            log.info("{} of {} reactions affected by {} flow modifiers.", modCount, rCount, this.modifiers.size());
         }
     }
 

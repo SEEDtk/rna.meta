@@ -5,7 +5,6 @@ package org.theseed.metabolism;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
-import static org.theseed.test.Matchers.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -64,7 +63,7 @@ public class PathwayQueryTest {
         model.buildReactionNetwork();
         path1 = model.getPathway("icit_c", "cit_c");
         validatePath(path1, "icit_c", "cit_c");
-        assertThat(path1.contains(acontA), isFalse());
+        assertThat(path1.contains(acontA), equalTo(false));
         path1 = model.getPathway("cit_c", "icit_c");
         validatePath(path1, "cit_c", "icit_c");
         assertThat(path1.size(), equalTo(2));
@@ -72,7 +71,7 @@ public class PathwayQueryTest {
         model.buildReactionNetwork();
         path1 = model.getPathway("cit_c", "icit_c");
         validatePath(path1, "cit_c", "icit_c");
-        assertThat(path1.contains(acontA), isFalse());
+        assertThat(path1.contains(acontA), equalTo(false));
     }
 
     /**
@@ -123,7 +122,7 @@ public class PathwayQueryTest {
         for (Pathway.Element element : path1) {
             String output = element.getOutput();
             Reaction react = element.getReaction();
-            assertThat(react.isReversible() || ! element.isReversed(), isTrue());
+            assertThat(react.isReversible() || ! element.isReversed(), equalTo(true));
             var inputs = react.getOutputs(output).stream().map(x -> x.getMetabolite()).collect(Collectors.toList());
             assertThat(inputs, hasItem(input));
             input = output;

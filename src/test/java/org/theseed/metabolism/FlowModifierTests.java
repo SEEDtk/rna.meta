@@ -10,6 +10,7 @@ import org.theseed.metabolism.mods.FlowModifier;
 import org.theseed.metabolism.mods.ForwardOnlyModifier;
 import org.theseed.metabolism.mods.ModifierList;
 import org.theseed.metabolism.mods.ReactionSuppressModifier;
+import org.theseed.utils.ParseFailureException;
 
 import com.github.cliftonlabs.json_simple.JsonArray;
 
@@ -52,9 +53,9 @@ class FlowModifierTests {
     }
 
     @Test
-    void testApply() throws IOException {
+    void testApply() throws IOException, ParseFailureException {
         File gFile = new File("data", "MG1655-wild.gto");
-        File mFile = new File("data", "ecoli_cc.json");
+        File mFile = new File("data", "ecoli_all.json");
         Set<String> compounds = Set.of("btn_c", "cbl1_c", "thmpp_c");
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
@@ -72,6 +73,18 @@ class FlowModifierTests {
                     if (! stoich.isProduct() && compounds.contains(stoich.getMetabolite()))
                         assertThat(reaction.getActive(), equalTo(Reaction.ActiveDirections.FORWARD));
                 }
+            }
+        }
+        Pathway path1 = model.getPathway("glu__L_e", "glu__L_p").extend(model, "glu__L_c")
+                .extend(model, "ser__L_c", new IncludePathwayFilter(model, "PSP_L"));
+        assertThat(path1.getFirst().getInputs(), hasItem("glu__L_e"));
+        assertThat(path1.getLast().getOutput(), equalTo("ser__L_c"));
+        for (Pathway.Element elt : path1) {
+            var reaction = elt.getReaction();
+            assertThat(reaction.getBiggId(), not(equalTo("PGK")));
+            for (Reaction.Stoich stoich : reaction.getMetabolites()) {
+                if (! stoich.isProduct())
+                    assertThat(stoich.getMetabolite(), not(in(compounds)));
             }
         }
     }
