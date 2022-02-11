@@ -11,6 +11,7 @@ import org.theseed.utils.BaseProcessor;
  * stats		produce successor-frequency statistics for a model
  * distance		report the distance of each metabolite from a target product
  * reactions	report the reactions that produce a target product
+ * triggered	report the reactions triggered by a specific set of proteins
  */
 public class App
 {
@@ -33,6 +34,9 @@ public class App
             break;
         case "reactions" :
             processor = new ReactionsProcessor();
+            break;
+        case "triggered" :
+            processor = new TriggerProcessor();
             break;
         default:
             throw new RuntimeException("Invalid command " + command);

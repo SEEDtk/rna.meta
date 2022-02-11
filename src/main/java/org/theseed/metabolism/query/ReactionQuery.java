@@ -139,7 +139,7 @@ public abstract class ReactionQuery {
                 fids = aliasMap.getOrDefault(this.geneId, Collections.emptySet());
             }
             // Compute the triggered reactions for the features found.
-            Set<Reaction> retVal = fids.stream().flatMap(x -> model.getReactions(x).stream())
+            Set<Reaction> retVal = fids.stream().flatMap(x -> model.getTriggeredReactions(x).stream())
                     .collect(Collectors.toSet());
             return retVal;
         }

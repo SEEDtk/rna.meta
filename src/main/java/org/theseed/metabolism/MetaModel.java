@@ -82,6 +82,8 @@ public class MetaModel {
     private static Set<Reaction> NO_REACTIONS = Collections.emptySet();
     /** return value when no metabolite nodes are found */
     private List<ModelNode.Metabolite> NO_METABOLITES = Collections.emptyList();
+    /** map of aliases to FIG IDs */
+    private Map<String, Set<String>> aliasMap;
     /** maximum number of successor reactions for a compound to be considered common */
     private static int MAX_SUCCESSORS = 20;
     /** maximum pathway length */
@@ -344,9 +346,7 @@ public class MetaModel {
         // Get the nodes and compute the size of a node-based hash.
         JsonObject nodes = (JsonObject) modelObject.get("nodes");
         final int nodeHashSize = nodes.size() * 4 / 3 + 1;
-        // Now we want to build the reaction hashes.  First, we need a map of aliases
-        // to FIG IDs.
-        var aliasMap = genome.getAliasMap();
+        this.aliasMap = genome.getAliasMap();
         // Now we loop through the reactions, creating the maps.
         JsonObject reactions = (JsonObject) modelObject.get("reactions");
         int nReactions = reactions.size();
@@ -537,10 +537,20 @@ public class MetaModel {
      *
      * @param fid	feature whose reactions are desired
      */
-    public Set<Reaction> getReactions(String fid) {
-        Set<Reaction> retVal = this.reactionMap.get(fid);
-        if (retVal == null)
-            retVal = NO_REACTIONS;
+    public Set<Reaction> getTriggeredReactions(String fid) {
+        // The feature ID could be a real FIG ID or an alias.  We build a set of the
+        // FIG IDs found.
+        Set<String> genes = new TreeSet<String>();
+        if (fid.startsWith("fig|"))
+            genes.add(fid);
+        else
+            genes = this.aliasMap.getOrDefault(fid, Collections.emptySet());
+        // Now loop through the FIG IDs found, building the output set.
+        Set<Reaction> retVal = new TreeSet<Reaction>();
+        for (String gene : genes) {
+            var triggered = this.reactionMap.getOrDefault(gene, NO_REACTIONS);
+            retVal.addAll(triggered);
+        }
         return retVal;
     }
 

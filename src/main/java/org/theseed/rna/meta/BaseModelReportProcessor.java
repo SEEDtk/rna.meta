@@ -26,8 +26,6 @@ import org.theseed.utils.ParseFailureException;
  * -v	display more frequent log messages
  * -o	output file for report, if not STDOUT
  *
- * --sbml	name of an SBML file containing additional reactions to import
- *
  * @author Bruce Parrello
  *
  */

@@ -58,8 +58,11 @@ public class MetaModelTest {
         File mFile = new File("data", "ecoli_cc.json");
         Genome genome = new Genome(gFile);
         MetaModel model = new MetaModel(mFile, genome);
-        Collection<Reaction> reactions = model.getReactions("fig|511145.183.peg.2284");
+        Collection<Reaction> reactions = model.getTriggeredReactions("fig|511145.183.peg.2284");
         Optional<Reaction> targetReaction = reactions.stream().filter(x -> x.getBiggId().equals("CO2tex")).findFirst();
+        assertThat("CO2tex not found.", targetReaction.isPresent());
+        reactions = model.getTriggeredReactions("ompC");
+        targetReaction = reactions.stream().filter(x -> x.getBiggId().equals("CO2tex")).findFirst();
         assertThat("CO2tex not found.", targetReaction.isPresent());
         Reaction reaction0 = targetReaction.get();
         assertThat("Bad reversibility.", reaction0.isReversible());
