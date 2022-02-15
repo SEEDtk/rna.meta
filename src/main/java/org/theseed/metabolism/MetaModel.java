@@ -1061,4 +1061,20 @@ public class MetaModel {
         return retVal.orElse(null);
     }
 
+    /**
+     * @return a map of compound names to compound IDs
+     */
+    public Map<String, Set<String>> getCompoundMap() {
+        var retVal = new HashMap<String, Set<String>>(this.nodeMap.size());
+        for (ModelNode node : this.nodeMap.values()) {
+            if (node instanceof ModelNode.Metabolite) {
+                var compound = (ModelNode.Metabolite) node;
+                String name = compound.getName();
+                var idSet = retVal.computeIfAbsent(name, x -> new TreeSet<String>());
+                idSet.add(compound.getBiggId());
+            }
+        }
+        return retVal;
+    }
+
 }

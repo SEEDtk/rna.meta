@@ -3,9 +3,11 @@
  */
 package org.theseed.metabolism.mods;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -103,6 +105,52 @@ public class ModifierList {
      * @throws IOException
      */
     public ModifierList(TabbedLineReader tabReader) throws IOException {
+        this.readModifiers(tabReader);
+    }
+
+    /**
+     * Create a modifier list from an input file.
+     *
+     * @param inFile		tab-delimited file containing modifier commands and parameters
+     */
+    public ModifierList(File inFile) throws IOException {
+        try (TabbedLineReader inStream = new TabbedLineReader(inFile)) {
+            this.readModifiers(inStream);
+        }
+    }
+
+    /**
+     * Create an empty modifier list.
+     */
+    public ModifierList() {
+        this.modifiers = Collections.emptyList();
+    }
+
+    /**
+     * Create a modifier list from a JSON object.
+     *
+     * @param json		JSON array containing the flow modifier descriptors
+     *
+     * @throws IOException
+     */
+    public ModifierList(JsonArray json) throws IOException {
+        this.modifiers = new ArrayList<>(json.size());
+        for (Object modObj : json) {
+            JsonObject mod = (JsonObject) modObj;
+            String command = mod.getStringOrDefault(FlowKeys.COMMAND);
+            String parms = mod.getStringOrDefault(FlowKeys.PARMS);
+            this.addModifier(command, parms);
+        }
+   }
+
+    /**
+     * Read a modifier list from a tab-delimited input stream.
+     *
+     * @param tabReader		tabbed line reader stream containing the modifier specs
+     *
+     * @throws IOException
+     */
+    private void readModifiers(TabbedLineReader tabReader) throws IOException {
         this.modifiers = new ArrayList<>();
         for (TabbedLineReader.Line line : tabReader) {
             // We convert the command to upper case so it matches the enum name.
@@ -132,23 +180,6 @@ public class ModifierList {
         FlowModifier modifier = commandCode.create(parms);
         this.modifiers.add(new AbstractMap.SimpleEntry<String, FlowModifier>(command, modifier));
     }
-
-    /**
-     * Create a modifier list from a JSON object.
-     *
-     * @param json		JSON array containing the flow modifier descriptors
-     *
-     * @throws IOException
-     */
-    public ModifierList(JsonArray json) throws IOException {
-        this.modifiers = new ArrayList<>(json.size());
-        for (Object modObj : json) {
-            JsonObject mod = (JsonObject) modObj;
-            String command = mod.getStringOrDefault(FlowKeys.COMMAND);
-            String parms = mod.getStringOrDefault(FlowKeys.PARMS);
-            this.addModifier(command, parms);
-        }
-   }
 
     /**
      * This creates the JSON representation of the modifier list.  Each modifier is represented by an
@@ -218,6 +249,13 @@ public class ModifierList {
             return false;
         }
         return true;
+    }
+
+    /**
+     * @return the number of flow modifiers
+     */
+    public int size() {
+        return this.modifiers.size();
     }
 
 }

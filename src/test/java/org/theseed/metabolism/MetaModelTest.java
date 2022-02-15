@@ -253,4 +253,15 @@ public class MetaModelTest {
         }
     }
 
+    @Test
+    public void testCompoundMap() throws IOException {
+        File gFile = new File("data", "MG1655-wild.gto");
+        File mFile = new File("data", "ecoli_all.json");
+        Genome genome = new Genome(gFile);
+        MetaModel model = new MetaModel(mFile, genome);
+        var cMap = model.getCompoundMap();
+        var sugars = cMap.get("D-Glucose");
+        assertThat(sugars, containsInAnyOrder("glc__D_p", "glc__D_e", "glc__D_c"));
+    }
+
 }

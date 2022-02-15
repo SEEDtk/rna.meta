@@ -4,6 +4,7 @@
 package org.theseed.rna.meta;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,6 +26,7 @@ import org.theseed.metabolism.Pathway;
 import org.theseed.metabolism.PathwayFilter;
 import org.theseed.metabolism.PathwayFilter.IParms;
 import org.theseed.metabolism.Reaction;
+import org.theseed.metabolism.mods.ModifierList;
 import org.theseed.utils.ParseFailureException;
 
 /**
@@ -36,7 +38,9 @@ import org.theseed.utils.ParseFailureException;
  * GTO file for the base genome, the name of the output file (which will be
  * an Excel spreadsheet), and then the BiGG IDs of the required metabolites, in
  * order.  A pathway will be returned that starts from the first metabolite,
- * passes through all the others, and ends with the last metabolite.
+ * passes through all the others, and ends with the last metabolite.  If the first
+ * metabolite is a file name, it is presumed to be a pathway JSON file, and the pathway
+ * will be loaded and extended.
  *
  * The output will be in excel format.
  *
@@ -52,6 +56,8 @@ import org.theseed.utils.ParseFailureException;
  * --include	the ID of a reaction the pathway must include (filter type REACTIONS)
  * --avoid		the ID of a metabolite the pathway must avoid (filter type AVOID)
  * --loop		loop the path back to the original compound
+ * --mods		tab-delimited file (with headers) containing flow modifier commands
+ * --save		if specified, a file to contain the pathway in JSON format
  *
  * @author Bruce Parrello
  *
@@ -63,6 +69,8 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     private CustomWorkbook workbook;
     /** pathway filters */
     private PathwayFilter[] filters;
+    /** flow modifiers */
+    private ModifierList flowMods;
 
     // COMMAND-LINE OPTIONS
 
@@ -86,6 +94,14 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     @Option(name = "--loop", usage = "if specified, the path will be looped back to the first compound")
     private boolean loopFlag;
 
+    /** flow modifier input file */
+    @Option(name = "--mods", usage = "if specified, a tab-delimited file with headers containing flow modifier commands")
+    private File modFile;
+
+    /** JSON save file for pathway */
+    @Option(name = "--save", metaVar = "path.json", usage = "if specified, a file to which the pathway should be saved in JSON format")
+    private File saveFile;
+
     /** output excel file */
     @Argument(index = 2, metaVar = "outFile.xlsx", usage = "output excel file", required = true)
     private File outFile;
@@ -107,6 +123,8 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         this.includeList = new ArrayList<String>();
         this.avoidList = new ArrayList<String>();
         this.loopFlag = false;
+        this.modFile = null;
+        this.saveFile = null;
     }
 
     @Override
@@ -118,6 +136,19 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         if (this.maxPathway < 1)
             throw new ParseFailureException("Pathway limit must be positive");
         MetaModel.setMaxPathway(this.maxPathway);
+        // Set up the flow modifiers.
+        if (modFile == null) {
+            this.flowMods = new ModifierList();
+            log.info("No flow modifiers used.");
+        } else if (! this.modFile.canRead())
+            throw new FileNotFoundException("Flow modifier file {} is not found or unreadable.");
+        else {
+            this.flowMods = new ModifierList(this.modFile);
+            log.info("{} flow modifiers read from {}.", this.flowMods.size(), this.modFile);
+        }
+        // Check the save file.
+        if (this.saveFile != null)
+            log.info("Pathway will be saved to {} in JSON format.", this.saveFile);
         // Set up the output workbook.
         this.workbook = CustomWorkbook.create(this.outFile);
     }
@@ -126,14 +157,28 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     protected void runCommand() throws Exception {
         // Save the metabolic model.
         MetaModel model = this.getModel();
+        // Apply the flow modifiers.
+        this.flowMods.apply(model);
         // Create the pathway filters.
         this.filters = this.getFilters();
-        // Get the pathway from the input to the first output.
+        // Now we need to start the pathway.  Get an iterator through the outputs.
         Iterator<String> outputIter = this.otherIdList.iterator();
-        String output1 = outputIter.next();
-        log.info("Computing pathway from {} to {}.", this.inputId, output1);
-        Pathway path = model.getPathway(this.inputId, output1, this.filters);
-        // Now extend the path through the other metabolites.
+        Pathway path;
+        // Do we already have an input pathway?
+        File inputPathFile = new File(this.inputId);
+        if (inputPathFile.isFile()) {
+            // Yes.  Try to read it.
+            log.info("Reading initial pathway from file {}.", inputPathFile);
+            path = new Pathway(inputPathFile, model);
+            // We don't allow "--loop" in this case, because we don't know where to loop back to.
+            if (this.loopFlag)
+                throw new ParseFailureException("Cannot use --loop when extending a predefined pathway.");
+        } else {
+            String output1 = outputIter.next();
+            log.info("Computing pathway from {} to {}.", this.inputId, output1);
+            path = model.getPathway(this.inputId, output1, this.filters);
+        }
+        // Now extend the path through the remaining metabolites.
         while (path != null && outputIter.hasNext()) {
             String output = outputIter.next();
             log.info("Extending pathway to {}.", output);
@@ -147,6 +192,11 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         }
         // Next, get the list of branch reactions.
         var branches = path.getBranches(model);
+        // Check to see if we have to save the pathway to a file.
+        if (this.saveFile != null) {
+            log.info("Saving pathway to {}.", this.saveFile);
+            path.save(this.saveFile);
+        }
         // It is time to do the reports.  This will collect the triggering
         // genes.
         Set<String> goodGenes = new TreeSet<String>();
