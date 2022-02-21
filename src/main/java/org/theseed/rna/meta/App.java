@@ -12,6 +12,7 @@ import org.theseed.utils.BaseProcessor;
  * distance		report the distance of each metabolite from a target product
  * reactions	report the reactions that produce a target product
  * triggered	report the reactions triggered by a specific set of proteins
+ * rnaClass		report general statistics about features in a genome and a model
  */
 public class App
 {
@@ -37,6 +38,9 @@ public class App
             break;
         case "triggered" :
             processor = new TriggerProcessor();
+            break;
+        case "rnaClass" :
+            processor = new RnaClassProcessor();
             break;
         default:
             throw new RuntimeException("Invalid command " + command);
