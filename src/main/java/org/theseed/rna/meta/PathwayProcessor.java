@@ -202,7 +202,7 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         Set<String> goodGenes = new TreeSet<String>();
         // This will collect the input metabolites.
         CountMap<String> inputCounts = new CountMap<String>();
-        // Each pathway element transmits an direct-line input to an output.
+        // Each pathway element transmits a direct-line input to an output.
         // The inputs we want to count are the ones not in the direct line.
         // The first direct-line input is the main input.
         String oldInput = this.inputId;
