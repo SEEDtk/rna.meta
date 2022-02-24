@@ -170,9 +170,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
             // Yes.  Try to read it.
             log.info("Reading initial pathway from file {}.", inputPathFile);
             path = new Pathway(inputPathFile, model);
-            // We don't allow "--loop" in this case, because we don't know where to loop back to.
-            if (this.loopFlag)
-                throw new ParseFailureException("Cannot use --loop when extending a predefined pathway.");
         } else {
             String output1 = outputIter.next();
             log.info("Computing pathway from {} to {}.", this.inputId, output1);
@@ -188,7 +185,7 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
             throw new ParseFailureException("No path found.");
         if (this.loopFlag) {
             log.info("Looping pathway back to {}.", this.inputId);
-            path = model.loopPathway(path, this.inputId, this.filters);
+            path = model.loopPathway(path, this.filters);
         }
         // Next, get the list of branch reactions.
         var branches = path.getBranches(model);
