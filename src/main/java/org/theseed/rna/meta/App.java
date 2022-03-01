@@ -13,6 +13,7 @@ import org.theseed.utils.BaseProcessor;
  * reactions	report the reactions that produce a target product
  * triggered	report the reactions triggered by a specific set of proteins
  * rnaClass		report general statistics about features in a genome and a model
+ * compounds	list the compounds for a model
  */
 public class App
 {
@@ -41,6 +42,9 @@ public class App
             break;
         case "rnaClass" :
             processor = new RnaClassProcessor();
+            break;
+        case "compounds" :
+            processor = new CompoundsProcessor();
             break;
         default:
             throw new RuntimeException("Invalid command " + command);
