@@ -6,7 +6,6 @@ package org.theseed.rna.meta;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -23,8 +22,6 @@ import org.theseed.genome.Feature;
 import org.theseed.genome.Genome;
 import org.theseed.metabolism.MetaModel;
 import org.theseed.metabolism.Pathway;
-import org.theseed.metabolism.PathwayFilter;
-import org.theseed.metabolism.PathwayFilter.IParms;
 import org.theseed.metabolism.Reaction;
 import org.theseed.metabolism.mods.ModifierList;
 import org.theseed.utils.ParseFailureException;
@@ -53,8 +50,6 @@ import org.theseed.utils.ParseFailureException;
  * --common		the number of successor reactions that indicates a common compound
  * 				(default 20)
  * --maxLen		maximum size of a useful pathway (default 60)
- * --include	the ID of a reaction the pathway must include (filter type REACTIONS)
- * --avoid		the ID of a metabolite the pathway must avoid (filter type AVOID)
  * --loop		loop the path back to the original compound
  * --mods		tab-delimited file (with headers) containing flow modifier commands
  * --save		if specified, a file to contain the pathway in JSON format
@@ -62,13 +57,11 @@ import org.theseed.utils.ParseFailureException;
  * @author Bruce Parrello
  *
  */
-public class PathwayProcessor extends BaseModelProcessor implements IParms {
+public class PathwayProcessor extends BaseModelProcessor {
 
     // FIELDS
     /** excel workbook for output */
     private CustomWorkbook workbook;
-    /** pathway filters */
-    private PathwayFilter[] filters;
     /** flow modifiers */
     private ModifierList flowMods;
 
@@ -81,14 +74,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     /** maximum size of a useful pathway */
     @Option(name = "--maxLen", metaVar = "200", usage = "maximum size of a useful pathway")
     private int maxPathway;
-
-    /** list of IDs for reactions to include */
-    @Option(name = "--include", aliases = { "-I" }, usage = "ID of a required reaction (multiple allowed)")
-    private List<String> includeList;
-
-    /** list of IDs for metabolites to avoid */
-    @Option(name = "--avoid", aliases = { "-A" }, usage = "ID of a prohibited metabolite (multiple allowed)")
-    private List<String> avoidList;
 
     /** TRUE if the path should be looped */
     @Option(name = "--loop", usage = "if specified, the path will be looped back to the first compound")
@@ -120,8 +105,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     protected void setModelDefaults() {
         this.maxSuccessors = 20;
         this.maxPathway = 60;
-        this.includeList = new ArrayList<String>();
-        this.avoidList = new ArrayList<String>();
         this.loopFlag = false;
         this.modFile = null;
         this.saveFile = null;
@@ -159,8 +142,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         MetaModel model = this.getModel();
         // Apply the flow modifiers.
         this.flowMods.apply(model);
-        // Create the pathway filters.
-        this.filters = this.getFilters();
         // Now we need to start the pathway.  Get an iterator through the outputs.
         Iterator<String> outputIter = this.otherIdList.iterator();
         Pathway path;
@@ -173,19 +154,19 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
         } else {
             String output1 = outputIter.next();
             log.info("Computing pathway from {} to {}.", this.inputId, output1);
-            path = model.getPathway(this.inputId, output1, this.filters);
+            path = model.getPathway(this.inputId, output1);
         }
         // Now extend the path through the remaining metabolites.
         while (path != null && outputIter.hasNext()) {
             String output = outputIter.next();
             log.info("Extending pathway to {}.", output);
-            path = model.extendPathway(path, output, filters);
+            path = model.extendPathway(path, output);
         }
         if (path == null)
             throw new ParseFailureException("No path found.");
         if (this.loopFlag) {
             log.info("Looping pathway back to {}.", this.inputId);
-            path = model.loopPathway(path, this.filters);
+            path = model.loopPathway(path);
         }
         // Next, get the list of branch reactions.
         var branches = path.getBranches(model);
@@ -277,22 +258,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
     }
 
     /**
-     * @return the list of filters for this pathway query
-     *
-     * @throws ParseFailureException
-     * @throws IOException
-     */
-    private PathwayFilter[] getFilters() throws IOException, ParseFailureException {
-        // Get all the applicable types.
-        var types = Arrays.stream(PathwayFilter.Type.values()).filter(x -> x.isApplicable(this))
-                .toArray(PathwayFilter.Type[]::new);
-        PathwayFilter[] retVal = new PathwayFilter[types.length];
-        for (int i = 0; i < retVal.length; i++)
-            retVal[i] = types[i].create(this);
-        return retVal;
-    }
-
-    /**
      * This method will write a set of genes to the triggering worksheet.
      *
      * @param genes			set of genes to write
@@ -324,16 +289,6 @@ public class PathwayProcessor extends BaseModelProcessor implements IParms {
                 }
             }
         }
-    }
-
-    @Override
-    public List<String> getInclude() {
-        return this.includeList;
-    }
-
-    @Override
-    public List<String> getAvoid() {
-        return this.avoidList;
     }
 
     @Override
