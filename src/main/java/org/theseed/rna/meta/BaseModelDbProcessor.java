@@ -10,11 +10,11 @@ import java.io.IOException;
 import org.kohsuke.args4j.Argument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.theseed.basic.ParseFailureException;
 import org.theseed.erdb.utils.BaseDbProcessor;
 import org.theseed.genome.Genome;
 import org.theseed.java.erdb.DbConnection;
 import org.theseed.metabolism.MetaModel;
-import org.theseed.utils.ParseFailureException;
 
 /**
  * This is a base class for processing metabolic models against the RNA database

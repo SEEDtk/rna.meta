@@ -16,6 +16,7 @@ import java.util.TreeSet;
 import org.apache.commons.lang3.StringUtils;
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
+import org.theseed.basic.ParseFailureException;
 import org.theseed.counters.CountMap;
 import org.theseed.excel.CustomWorkbook;
 import org.theseed.genome.Feature;
@@ -24,7 +25,6 @@ import org.theseed.metabolism.MetaModel;
 import org.theseed.metabolism.Pathway;
 import org.theseed.metabolism.Reaction;
 import org.theseed.metabolism.mods.ModifierList;
-import org.theseed.utils.ParseFailureException;
 
 /**
  * This command computes the shortest pathway between a series of metabolites.  The

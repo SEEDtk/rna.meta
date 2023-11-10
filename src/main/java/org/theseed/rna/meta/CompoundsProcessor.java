@@ -9,8 +9,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Set;
 
+import org.theseed.basic.ParseFailureException;
 import org.theseed.metabolism.MetaModel;
-import org.theseed.utils.ParseFailureException;
 
 /**
  * This is a simple command that lists the compounds in the model.

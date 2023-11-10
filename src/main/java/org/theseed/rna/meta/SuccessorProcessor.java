@@ -8,9 +8,9 @@ import java.io.PrintWriter;
 import java.util.Set;
 import java.util.TreeSet;
 
+import org.theseed.basic.ParseFailureException;
 import org.theseed.metabolism.MetaModel;
 import org.theseed.metabolism.Reaction;
-import org.theseed.utils.ParseFailureException;
 
 /**
  * This produces a report on the successor counts in a model.  It provides a good way to

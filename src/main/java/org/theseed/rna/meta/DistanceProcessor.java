@@ -12,8 +12,8 @@ import java.util.Set;
 
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
+import org.theseed.basic.ParseFailureException;
 import org.theseed.metabolism.MetaModel;
-import org.theseed.utils.ParseFailureException;
 
 /**
  * This command outputs the distance from each metabolite to a target product;
